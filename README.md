@@ -2,6 +2,7 @@
 
 原作者：**[技术爬爬虾](https://github.com/tech-shrimp/me)**
 B站，抖音，Youtube全网同名，感谢原作者的原创项目！
+源项目地址：https://github.com/tech-shrimp/docker_image_pusher
 本项目基于原项目进行了优化和改进：使用skopeo、添加邮件通知等
 
 使用Github Action将国外的Docker镜像转存到阿里云私有仓库，供国内服务器使用，免费易用
@@ -10,8 +11,6 @@ B站，抖音，Youtube全网同名，感谢原作者的原创项目！
 - 只复制amd64架构，节省空间和时间
 - 支持邮件通知同步结果
 - 使用阿里云的官方线路，速度快
-
-视频教程：https://www.bilibili.com/video/BV1Zn4y19743/
 
 ## 功能特性
 
@@ -29,14 +28,11 @@ B站，抖音，Youtube全网同名，感谢原作者的原创项目！
 登录阿里云容器镜像服务
 https://cr.console.aliyun.com/
 启用个人实例，创建一个命名空间（**ALIYUN_NAME_SPACE**）
-![](/doc/命名空间.png)
 
 访问凭证–&gt;获取环境变量
 用户名（**ALIYUN_REGISTRY_USER**)
 密码（**ALIYUN_REGISTRY_PASSWORD**)
 仓库地址（**ALIYUN_REGISTRY**）
-
-![](/doc/用户名密码.png)
 
 
 ### Fork本项目
@@ -45,7 +41,6 @@ Fork本项目
 进入您自己的项目，点击Action，启用Github Action功能
 #### 配置环境变量
 进入Settings-&gt;Secret and variables-&gt;Actions-&gt;New Repository secret
-![](doc/配置环境变量.png)
 将上一步的**四个值**
 ALIYUN_NAME_SPACE,ALIYUN_REGISTRY_USER，ALIYUN_REGISTRY_PASSWORD，ALIYUN_REGISTRY
 配置成环境变量
@@ -60,12 +55,10 @@ ALIYUN_NAME_SPACE,ALIYUN_REGISTRY_USER，ALIYUN_REGISTRY_PASSWORD，ALIYUN_REGIS
 可以加tag，也可以不用(默认latest)
 可使用 k8s.gcr.io/kube-state-metrics/kube-state-metrics 格式指定私库
 可使用 #开头作为注释
-![](doc/images.png)
 文件提交后，自动进入Github Action构建
 
 ### 使用镜像
 回到阿里云，镜像仓库，点击任意镜像，可查看镜像状态。(可以改成公开，拉取镜像免登录)
-![](doc/开始使用.png)
 
 在国内服务器pull镜像, 例如：
 ```
@@ -83,9 +76,7 @@ alpine 即 阿里云中显示的镜像名
 xhofe/alist
 xiaoyaliu/alist
 ```
-![](doc/镜像重名.png)
 
 ### 定时执行
 修改/.github/workflows/docker.yaml文件
 添加 schedule即可定时执行(此处cron使用UTC时区)
-![](doc/定时执行.png)
