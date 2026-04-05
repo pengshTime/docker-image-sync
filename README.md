@@ -1,7 +1,6 @@
-# Docker Images Pusher
+# Docker Image Sync
 
 原作者：**[技术爬爬虾](https://github.com/tech-shrimp/me)**
-B站，抖音，Youtube全网同名，感谢原作者的原创项目！
 源项目地址：https://github.com/tech-shrimp/docker_image_pusher
 本项目基于原项目进行了优化和改进：使用skopeo、添加邮件通知等
 
@@ -34,9 +33,6 @@ https://cr.console.aliyun.com/
 密码（**ALIYUN_REGISTRY_PASSWORD**)
 仓库地址（**ALIYUN_REGISTRY**）
 
-
-### Fork本项目
-Fork本项目
 #### 启动Action
 进入您自己的项目，点击Action，启用Github Action功能
 #### 配置环境变量
