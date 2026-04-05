@@ -149,8 +149,8 @@ jobs:
             echo "New image name: $new_image"
 
             # 收集镜像列表
-            source_images_list+="• $image\n"
-            aliyun_images_list+="• $new_image\n"
+            source_images_list+="• $image"$'\n'
+            aliyun_images_list+="• $new_image"$'\n'
 
             # 构建源镜像URL
             if echo "$image" | grep -q '^[a-zA-Z0-9.-]*\/'; then
@@ -208,9 +208,16 @@ jobs:
         echo "success_count=$success_count" >> $GITHUB_OUTPUT
         echo "skipped_count=$skipped_count" >> $GITHUB_OUTPUT
         echo "failure_count=$failure_count" >> $GITHUB_OUTPUT
-        echo "source_images_list=$source_images_list" >> $GITHUB_OUTPUT
-        echo "aliyun_images_list=$aliyun_images_list" >> $GITHUB_OUTPUT
         echo "aliyun_registry=$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE" >> $GITHUB_OUTPUT
+        
+        # 使用多行输出格式
+        echo "source_images_list<<EOF" >> $GITHUB_OUTPUT
+        echo "$source_images_list" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        echo "aliyun_images_list<<EOF" >> $GITHUB_OUTPUT
+        echo "$aliyun_images_list" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
 
         # 如果有失败的镜像，退出码为1
         if [ $failure_count -gt 0 ]; then
