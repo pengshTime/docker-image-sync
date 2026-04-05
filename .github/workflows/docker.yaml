@@ -74,14 +74,7 @@ jobs:
     - name: Build and push image Aliyun
       run: |
         # 配置skopeo认证
-        mkdir -p ~/.docker
-        echo "{
-          \"auths\": {
-            \"$ALIYUN_REGISTRY\": {
-              \"auth\": \"$(echo -n \"$ALIYUN_REGISTRY_USER:$ALIYUN_REGISTRY_PASSWORD\" | base64)\"
-            }
-          }
-        }" > ~/.docker/config.json
+        echo "$ALIYUN_REGISTRY_PASSWORD" | skopeo login --username "$ALIYUN_REGISTRY_USER" --password-stdin "$ALIYUN_REGISTRY"
 
         # 数据预处理,判断镜像是否重名
         declare -A duplicate_images
