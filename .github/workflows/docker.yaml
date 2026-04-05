@@ -52,8 +52,7 @@ jobs:
 
     - name: Install skopeo
       run: |
-        sudo apt-get update
-        sudo apt-get install -y skopeo
+        curl -sL https://github.com/containers/skopeo/releases/download/v1.14.0/skopeo-linux-amd64.tar.gz | tar xz -C /usr/local/bin --strip-components=1
 
     - name: Validate image list file
       run: |
