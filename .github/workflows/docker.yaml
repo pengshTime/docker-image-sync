@@ -2,6 +2,11 @@ name: Docker
 
 on:
   workflow_dispatch:
+    inputs:
+      image_list_file:
+        description: 'Path to the image list file'
+        required: true
+        default: 'images.yaml'
   push:
     branches: [ main ]
 
@@ -11,6 +16,7 @@ env:
   ALIYUN_NAME_SPACE: "${{ secrets.ALIYUN_NAME_SPACE }}"
   ALIYUN_REGISTRY_USER: "${{ secrets.ALIYUN_REGISTRY_USER }}"
   ALIYUN_REGISTRY_PASSWORD: "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
+  IMAGE_LIST_FILE: "${{ github.event.inputs.image_list_file || env.IMAGE_LIST_FILE || 'images.yaml' }}"
 
 jobs:
 
@@ -39,9 +45,6 @@ jobs:
         # remove-codeql: 'true'
         build-mount-path: '/var/lib/docker/'
 
-    - name: Restart docker
-      run: sudo service docker restart
-
     - name: Free up disk space complete
       run: |
         echo "Free up disk space complete"
@@ -52,33 +55,83 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Docker Setup Buildx
-      uses: docker/setup-buildx-action@v3
+    - name: Remove Docker setup steps
+      run: echo "Docker setup no longer needed with skopeo"
+
+    - name: Install yq
+      run: |
+        # 安装yq用于解析YAML
+        sudo apt-get update && sudo apt-get install -y yq
+
+    - name: Validate YAML format
+      run: |
+        # 验证YAML格式是否正确
+        if ! yq eval '.' $IMAGE_LIST_FILE >/dev/null 2>&1; then
+            echo "Error: Invalid YAML format in $IMAGE_LIST_FILE"
+            exit 1
+        fi
+        # 检查是否为数组格式
+        if ! yq eval 'type' $IMAGE_LIST_FILE | grep -q 'array'; then
+            echo "Error: YAML file should contain an array of images"
+            exit 1
+        fi
+        # 检查数组是否为空
+        total_images=$(yq eval 'length' $IMAGE_LIST_FILE)
+        if [ $total_images -eq 0 ]; then
+            echo "Error: No images found in $IMAGE_LIST_FILE"
+            exit 1
+        fi
+        echo "YAML format validation passed"
 
     - name: Build and push image Aliyun
       run: |
-        docker login -u $ALIYUN_REGISTRY_USER -p $ALIYUN_REGISTRY_PASSWORD $ALIYUN_REGISTRY
+        # 配置skopeo认证
+        mkdir -p ~/.docker
+        echo "{
+          \"auths\": {
+            \"$ALIYUN_REGISTRY\": {
+              \"auth\": \"$(echo -n \"$ALIYUN_REGISTRY_USER:$ALIYUN_REGISTRY_PASSWORD\" | base64)\"
+            }
+          }
+        }" > ~/.docker/config.json
+        
         # 数据预处理,判断镜像是否重名
         declare -A duplicate_images
         declare -A temp_map
-        while IFS= read -r line || [ -n "$line" ]; do
+        
+        # 遍历YAML中的镜像列表
+        total_images=$(yq eval 'length' $IMAGE_LIST_FILE)
+        echo "Total images to process: $total_images"
+        for ((i=0; i<total_images; i++)); do
+            echo "
+=== Processing image $((i+1)) of $total_images ==="
+            # 获取镜像数组
+            image_array=$(yq eval ".[$i]" $IMAGE_LIST_FILE)
+            echo "Raw image array: $image_array"
+            # 提取镜像地址
+            line=$(echo "$image_array" | sed 's/\[\(.*\)\]/\1/')
+            echo "Extracted line: $line"
             # 忽略空行与注释
             [[ -z "$line" ]] && continue
             if echo "$line" | grep -q '^\s*#'; then
+                echo "Skipping comment line: $line"
                 continue
             fi
             
-            # 获取镜像的完整名称，例如kasmweb/nginx:1.25.3（命名空间/镜像名:版本号）
-            image=$(echo "$line" | awk '{print $NF}')
+            # 镜像地址
+            image="$line"
             # 将@sha256:等字符删除
             image="${image%%@*}"
-            echo "image $image"
+            echo "Cleaned image address: $image"
+            # 平台参数为空
+            platform=""
+            echo "Platform: $platform"
             # 获取镜像名:版本号  例如nginx:1.25.3
             image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
-            echo "image_name_tag $image_name_tag"
+            echo "Image name and tag: $image_name_tag"
             # 获取命名空间 例如kasmweb,  这里有种特殊情况 docker.io/nginx，把docker.io当成命名空间，也OK
             name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
-            echo "name_space: $name_space"
+            echo "Name space: $name_space"
             # 这里不要是空值影响判断
             name_space="${name_space}_"
             # 获取镜像名例如nginx
@@ -96,20 +149,39 @@ jobs:
                 # 存镜像的命名空间
                 temp_map[$image_name]=$name_space
             fi       
-        done < images.txt
+        done
         
+        # 初始化成功和失败计数
+        success_count=0
+        failure_count=0
         
-        while IFS= read -r line || [ -n "$line" ]; do
+        # 处理每个镜像
+        echo "
+=== Starting image processing ==="
+        for ((i=0; i<total_images; i++)); do
+            echo "
+=== Processing image $((i+1)) of $total_images ==="
+            # 获取镜像数组
+            image_array=$(yq eval ".[$i]" $IMAGE_LIST_FILE)
+            echo "Raw image array: $image_array"
+            # 提取镜像地址
+            line=$(echo "$image_array" | sed 's/\[\(.*\)\]/\1/')
+            echo "Extracted line: $line"
             # 忽略空行与注释
             [[ -z "$line" ]] && continue
             if echo "$line" | grep -q '^\s*#'; then
+                echo "Skipping comment line: $line"
                 continue
             fi
         
-            echo "docker pull $line"
-            docker pull $line
-            platform=$(echo "$line" | awk -F'--platform[ =]' '{if (NF>1) print $2}' | awk '{print $1}')
-            echo "platform is $platform"
+            # 镜像地址
+            image="$line"
+            # 将@sha256:等字符删除
+            image="${image%%@*}"
+            echo "Cleaned image address: $image"
+            # 平台参数为空
+            platform=""
+            echo "Platform: $platform"
             # 如果存在架构信息 将架构信息拼到镜像名称前面
             if [ -z "$platform" ]; then
                 platform_prefix=""
@@ -117,8 +189,6 @@ jobs:
                 platform_prefix="${platform//\//_}_"
             fi
             echo "platform_prefix is $platform_prefix"
-            # 获取镜像的完整名称，例如kasmweb/nginx:1.25.3（命名空间/镜像名:版本号）
-            image=$(echo "$line" | awk '{print $NF}')
 
             # 获取 镜像名:版本号  例如nginx:1.25.3
             image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
@@ -139,19 +209,86 @@ jobs:
             # 将@sha256:等字符删除
             image_name_tag="${image_name_tag%%@*}"
             new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$platform_prefix$name_space_prefix$image_name_tag"
-            echo "docker tag $image $new_image"
-            docker tag $image $new_image
-            echo "docker push $new_image"
-            docker push $new_image
-            echo "开始清理磁盘空间"
-            echo "=============================================================================="
-            df -hT
-            echo "=============================================================================="
-            docker rmi $image
-            docker rmi $new_image
-            echo "磁盘空间清理完毕"
-            echo "=============================================================================="
-            df -hT
-            echo "=============================================================================="     
             
-        done < images.txt
+            # 获取镜像名:版本号  例如nginx:1.25.3
+            image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
+            echo "Image name and tag: $image_name_tag"
+            # 获取命名空间 例如kasmweb,  这里有种特殊情况 docker.io/nginx，把docker.io当成命名空间，也OK
+            name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
+            echo "Name space: $name_space"
+            # 这里不要是空值影响判断
+            name_space="${name_space}_"
+            # 检查是否重名
+            if [[ -n "${duplicate_images[$image_name_tag]}" ]]; then
+                # 重名镜像添加命名空间前缀
+                new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/${name_space}${image_name_tag}"
+            else
+                # 不重名镜像直接使用原镜像名
+                new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$image_name_tag"
+            fi
+            echo "New image name: $new_image"
+            # 构建源镜像URL
+            if echo "$image" | grep -q '^[a-zA-Z0-9.-]*\/'; then
+                # 已经包含仓库地址或命名空间
+                source_image="docker://$image"
+            else
+                # 默认为Docker Hub
+                source_image="docker://docker.io/library/$image"
+            fi
+            echo "Source image: $source_image"
+            
+            # 检查阿里云是否已经存在该镜像
+            echo "Checking if $new_image exists in Aliyun ACR"
+            if skopeo inspect docker://$new_image >/dev/null 2>&1; then
+                echo "Image $new_image already exists in Aliyun ACR, skipping"
+                success_count=$((success_count+1))
+                continue
+            fi
+            
+            # 使用skopeo复制镜像，重试3次
+            echo "Copying $source_image to $new_image"
+            retry_count=0
+            max_retries=3
+            success=false
+            
+            # 构建skopeo命令
+            skopeo_cmd="skopeo copy --all"
+            if [ -n "$platform" ]; then
+                # 解析平台参数
+                os=$(echo "$platform" | awk -F'/' '{print $1}')
+                arch=$(echo "$platform" | awk -F'/' '{print $2}')
+                if [ -n "$os" ] && [ -n "$arch" ]; then
+                    skopeo_cmd="$skopeo_cmd --override-os $os --override-arch $arch"
+                fi
+            fi
+            skopeo_cmd="$skopeo_cmd $source_image docker://$new_image"
+            
+            while [ $retry_count -lt $max_retries ]; do
+                if eval "$skopeo_cmd"; then
+                    echo "Successfully copied $source_image to $new_image"
+                    success=true
+                    success_count=$((success_count+1))
+                    break
+                else
+                    echo "Failed to copy $source_image (attempt $((retry_count+1)) of $max_retries)"
+                    retry_count=$((retry_count+1))
+                    if [ $retry_count -lt $max_retries ]; then
+                        echo "Retrying in 5 seconds..."
+                        sleep 5
+                    fi
+                fi
+            done
+            
+            if [ "$success" = false ]; then
+                echo "Failed to copy $source_image after $max_retries attempts"
+                failure_count=$((failure_count+1))
+            fi
+            
+        done
+        
+        # 汇总结果
+        echo "=============================================================================="
+        echo "Summary:"
+        echo "Successfully copied $success_count images"
+        echo "Failed to copy $failure_count images"
+        echo "=============================================================================="
