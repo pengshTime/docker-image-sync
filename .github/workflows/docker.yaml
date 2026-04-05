@@ -103,8 +103,7 @@ jobs:
         total_images=$(yq eval 'length' $IMAGE_LIST_FILE)
         echo "Total images to process: $total_images"
         for ((i=0; i<total_images; i++)); do
-            echo "
-=== Processing image $((i+1)) of $total_images ==="
+            echo "=== Processing image $((i+1)) of $total_images ==="
             # 获取镜像数组
             image_array=$(yq eval ".[$i]" $IMAGE_LIST_FILE)
             echo "Raw image array: $image_array"
@@ -156,11 +155,9 @@ jobs:
         failure_count=0
         
         # 处理每个镜像
-        echo "
-=== Starting image processing ==="
+        echo "=== Starting image processing ==="
         for ((i=0; i<total_images; i++)); do
-            echo "
-=== Processing image $((i+1)) of $total_images ==="
+            echo "=== Processing image $((i+1)) of $total_images ==="
             # 获取镜像数组
             image_array=$(yq eval ".[$i]" $IMAGE_LIST_FILE)
             echo "Raw image array: $image_array"
