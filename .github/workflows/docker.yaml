@@ -72,6 +72,7 @@ jobs:
         grep -v '^#' "$IMAGE_LIST_FILE" | grep -v '^$'
 
     - name: Build and push image Aliyun
+      id: sync-images
       run: |
         # 配置skopeo认证
         echo "$ALIYUN_REGISTRY_PASSWORD" | skopeo login --username "$ALIYUN_REGISTRY_USER" --password-stdin "$ALIYUN_REGISTRY"
@@ -110,6 +111,11 @@ jobs:
         # 初始化成功和失败计数
         success_count=0
         failure_count=0
+        skipped_count=0
+
+        # 用于收集镜像信息
+        source_images_list=""
+        aliyun_images_list=""
 
         # 处理每个镜像
         echo "=== Starting image processing ==="
@@ -142,6 +148,10 @@ jobs:
             fi
             echo "New image name: $new_image"
 
+            # 收集镜像列表
+            source_images_list+="• $image\n"
+            aliyun_images_list+="• $new_image\n"
+
             # 构建源镜像URL
             if echo "$image" | grep -q '^[a-zA-Z0-9.-]*\/'; then
                 source_image="docker://$image"
@@ -154,7 +164,7 @@ jobs:
             echo "Checking if $new_image exists in Aliyun ACR"
             if skopeo inspect docker://$new_image >/dev/null 2>&1; then
                 echo "Image $new_image already exists in Aliyun ACR, skipping"
-                success_count=$((success_count+1))
+                skipped_count=$((skipped_count+1))
                 continue
             fi
 
@@ -190,10 +200,45 @@ jobs:
         echo "=============================================================================="
         echo "Summary:"
         echo "Successfully copied $success_count images"
+        echo "Skipped (already exists): $skipped_count images"
         echo "Failed to copy $failure_count images"
         echo "=============================================================================="
+
+        # 设置输出变量
+        echo "success_count=$success_count" >> $GITHUB_OUTPUT
+        echo "skipped_count=$skipped_count" >> $GITHUB_OUTPUT
+        echo "failure_count=$failure_count" >> $GITHUB_OUTPUT
+        echo "source_images_list=$source_images_list" >> $GITHUB_OUTPUT
+        echo "aliyun_images_list=$aliyun_images_list" >> $GITHUB_OUTPUT
+        echo "aliyun_registry=$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE" >> $GITHUB_OUTPUT
 
         # 如果有失败的镜像，退出码为1
         if [ $failure_count -gt 0 ]; then
             exit 1
         fi
+
+    - name: Send email notification
+      if: always()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.163.com
+        server_port: 465
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: Docker镜像同步完成通知
+        to: ${{ secrets.EMAIL_USERNAME }}
+        from: GitHub Actions
+        body: |
+          🐳 Docker镜像同步报告
+          ━━━━━━━━━━━━━━━━━━━━
+          ✅ 成功: ${{ steps.sync-images.outputs.success_count }} 个
+          已存在无需同步: ${{ steps.sync-images.outputs.skipped_count }} 个
+          ❌ 失败: ${{ steps.sync-images.outputs.failure_count }} 个
+          ━━━━━━━━━━━━━━━━━━━━
+          📋 源镜像列表:
+          ${{ steps.sync-images.outputs.source_images_list }}
+          ━━━━━━━━━━━━━━━━━━━━
+          🔗 阿里云镜像列表:
+          ${{ steps.sync-images.outputs.aliyun_images_list }}
+          ━━━━━━━━━━━━━━━━━━━━
+          🏠 阿里云仓库地址: ${{ steps.sync-images.outputs.aliyun_registry }}
