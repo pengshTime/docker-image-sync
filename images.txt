@@ -4,3 +4,4 @@
 jgraph/drawio:latest
 azukaar/cosmos-server:latest
 corentinth/it-tools:latest
+fnsys/dockhand:latest
