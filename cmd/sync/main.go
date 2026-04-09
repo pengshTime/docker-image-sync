@@ -231,15 +231,40 @@ func syncWithRetry(ctx context.Context, p provider.Provider, img string, timeout
 	return result
 }
 
-// showProgress 显示进度（简化版，避免与日志冲突）
+// showProgress 显示进度条（使用 stderr 避免与日志混合）
 func showProgress(total int, progressChan <-chan struct{}) {
 	completed := 0
+	lastCompleted := -1
 	
 	for range progressChan {
 		completed++
-		// 只在完成时打印进度
-		fmt.Printf("Progress: %d/%d (%.1f%%)\n", completed, total, float64(completed)/float64(total)*100)
+		// 只在进度变化时更新
+		if completed != lastCompleted {
+			lastCompleted = completed
+			printProgressBar(completed, total)
+		}
 	}
+	// 完成后换行
+	fmt.Fprintln(os.Stderr, "")
+}
+
+// printProgressBar 打印进度条到 stderr
+func printProgressBar(current, total int) {
+	width := 30
+	percent := float64(current) / float64(total)
+	filled := int(float64(width) * percent)
+
+	bar := ""
+	for i := 0; i < width; i++ {
+		if i < filled {
+			bar += "█"
+		} else {
+			bar += "░"
+		}
+	}
+
+	// 输出到 stderr，使用 \r 回到行首
+	fmt.Fprintf(os.Stderr, "\r[%s] %d/%d (%.1f%%)", bar, current, total, percent*100)
 }
 
 // isRetryableError 判断错误是否可重试
