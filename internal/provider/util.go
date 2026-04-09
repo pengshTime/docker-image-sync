@@ -72,15 +72,33 @@ func ParseImage(sourceImage string) ParsedImage {
 	return result
 }
 
+// sanitizeImageName 清理镜像名，替换特殊字符
+// 华为云/腾讯云对镜像名有严格要求，需要替换 / 和 .
+func sanitizeImageName(name string) string {
+	// 替换 / 为 _
+	name = strings.ReplaceAll(name, "/", "_")
+	// 替换 . 为 _
+	name = strings.ReplaceAll(name, ".", "_")
+	// 替换其他可能不支持的字符
+	name = strings.ReplaceAll(name, "-", "_")
+	return name
+}
+
 // BuildTargetImage 构建目标镜像地址
 // 华为云/腾讯云格式: registry/namespace/prefix_name:tag
 // 阿里云格式: registry/namespace/name:tag
 func BuildTargetImage(registry, namespace string, img ParsedImage, usePrefix bool) string {
 	var targetImageName string
+	
+	// 清理镜像名中的特殊字符
+	sanitizedName := sanitizeImageName(img.Name)
+	
 	if usePrefix && img.Namespace != "" {
-		targetImageName = img.Namespace + "_" + img.Name
+		// 清理 namespace 中的特殊字符
+		sanitizedNamespace := sanitizeImageName(img.Namespace)
+		targetImageName = sanitizedNamespace + "_" + sanitizedName
 	} else {
-		targetImageName = img.Name
+		targetImageName = sanitizedName
 	}
 
 	if img.Tag != "" && img.Tag != "latest" {
@@ -90,16 +108,40 @@ func BuildTargetImage(registry, namespace string, img ParsedImage, usePrefix boo
 }
 
 // checkImageExists 检查镜像是否已存在
+// 返回: (是否存在, 错误)
+// 如果是权限错误或网络错误，返回 error 终止程序
+// 如果是镜像不存在，返回 (false, nil) 继续同步
 func checkImageExists(ctx context.Context, image string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "skopeo", "inspect", fmt.Sprintf("docker://%s", image))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		if strings.Contains(string(output), "manifest unknown") ||
-			strings.Contains(string(output), "not found") ||
-			strings.Contains(string(output), "denied") {
+		outputStr := string(output)
+		
+		// 镜像确实不存在的情况
+		if strings.Contains(outputStr, "manifest unknown") ||
+			strings.Contains(outputStr, "404") ||
+			strings.Contains(outputStr, "not found") ||
+			strings.Contains(outputStr, "name unknown") {
 			return false, nil
 		}
-		return false, err
+		
+		// 权限错误 - 终止程序
+		if strings.Contains(outputStr, "401") ||
+			strings.Contains(outputStr, "Unauthorized") ||
+			strings.Contains(outputStr, "authentication required") {
+			return false, fmt.Errorf("unauthorized: check your registry credentials")
+		}
+		
+		// 网络超时错误 - 终止程序
+		if strings.Contains(outputStr, "timeout") ||
+			strings.Contains(outputStr, "deadline exceeded") ||
+			strings.Contains(outputStr, "no such host") ||
+			strings.Contains(outputStr, "connection refused") {
+			return false, fmt.Errorf("network error: %v", err)
+		}
+		
+		// 其他错误也终止程序
+		return false, fmt.Errorf("skopeo inspect failed: %v, output: %s", err, outputStr)
 	}
 	return true, nil
 }
@@ -117,6 +159,8 @@ func skopeoCopy(ctx context.Context, source, target string) error {
 	cmd := exec.CommandContext(ctx, "skopeo", "copy",
 		"--override-arch", "amd64",
 		"--override-os", "linux",
+		"--src-tls-verify=true",
+		"--dest-tls-verify=true",
 		fmt.Sprintf("docker://%s", source),
 		fmt.Sprintf("docker://%s", target))
 	return cmd.Run()

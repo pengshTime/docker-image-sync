@@ -32,6 +32,10 @@ func (p *TencentProvider) RegistryDomain() string {
 	return p.registry
 }
 
+func (p *TencentProvider) Login() error {
+	return dockerLogin(p.registry, p.username, p.password)
+}
+
 func (p *TencentProvider) SyncImage(ctx context.Context, sourceImage string) (*SyncResult, error) {
 	targetImage := p.buildTargetImage(sourceImage)
 	result := &SyncResult{
@@ -49,11 +53,6 @@ func (p *TencentProvider) SyncImage(ctx context.Context, sourceImage string) (*S
 		result.Success = true
 		result.ErrorMessage = "already exists"
 		return result, nil
-	}
-
-	if err := dockerLogin(p.registry, p.username, p.password); err != nil {
-		result.ErrorMessage = fmt.Sprintf("login failed: %v", err)
-		return result, err
 	}
 
 	if err := skopeoCopy(ctx, sourceImage, targetImage); err != nil {

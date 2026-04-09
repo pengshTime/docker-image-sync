@@ -12,6 +12,7 @@ type SyncResult struct {
 type Provider interface {
 	Name() string
 	RegistryDomain() string
+	Login() error
 	SyncImage(ctx context.Context, sourceImage string) (*SyncResult, error)
 	CheckImageExists(ctx context.Context, image string) (bool, error)
 }

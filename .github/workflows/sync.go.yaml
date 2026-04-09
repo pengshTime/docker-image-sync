@@ -45,7 +45,9 @@ jobs:
           go mod download
 
       - name: Build
-        run: go build -o sync ./cmd/sync
+        run: |
+          BUILD_TIME=$(date +%Y-%m-%d_%H:%M:%S)
+          go build -ldflags "-X main.BuildTime=$BUILD_TIME" -o sync ./cmd/sync
 
       - name: Run sync
         env:

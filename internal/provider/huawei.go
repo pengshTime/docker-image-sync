@@ -32,6 +32,10 @@ func (p *HuaweiProvider) RegistryDomain() string {
 	return p.registry
 }
 
+func (p *HuaweiProvider) Login() error {
+	return dockerLogin(p.registry, p.username, p.password)
+}
+
 func (p *HuaweiProvider) SyncImage(ctx context.Context, sourceImage string) (*SyncResult, error) {
 	targetImage := p.buildTargetImage(sourceImage)
 	result := &SyncResult{
@@ -49,11 +53,6 @@ func (p *HuaweiProvider) SyncImage(ctx context.Context, sourceImage string) (*Sy
 		result.Success = true
 		result.ErrorMessage = "already exists"
 		return result, nil
-	}
-
-	if err := dockerLogin(p.registry, p.username, p.password); err != nil {
-		result.ErrorMessage = fmt.Sprintf("login failed: %v", err)
-		return result, err
 	}
 
 	if err := skopeoCopy(ctx, sourceImage, targetImage); err != nil {
