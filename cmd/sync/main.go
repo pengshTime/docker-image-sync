@@ -12,6 +12,7 @@ import (
 	"github.com/pengshtime/docker-image-sync/internal/config"
 	"github.com/pengshtime/docker-image-sync/internal/image"
 	"github.com/pengshtime/docker-image-sync/internal/logger"
+	"github.com/pengshtime/docker-image-sync/internal/notifier"
 	"github.com/pengshtime/docker-image-sync/internal/provider"
 )
 
@@ -172,8 +173,10 @@ func main() {
 	}()
 
 	var successCount, failureCount, skippedCount int
+	var syncResults []*provider.SyncResult
 
 	for result := range resultChan {
+		syncResults = append(syncResults, result)
 		if result.Success {
 			if result.ErrorMessage == "already exists" {
 				skippedCount++
@@ -205,6 +208,37 @@ func main() {
 	logger.Info("Skipped (exists): %d", skippedCount)
 	logger.Info("Failed: %d", failureCount)
 	logger.Info("========================================")
+
+	// 钉钉推送通知
+	dingNotifier := notifier.NewDingTalkNotifier()
+	if dingNotifier.IsEnabled() {
+		// 构建推送结果列表
+		var dingResults []notifier.SyncResult
+		for _, result := range syncResults {
+			dingResults = append(dingResults, notifier.SyncResult{
+				Success:      result.Success,
+				SourceImage:  result.SourceImage,
+				TargetImage:  result.TargetImage,
+				ErrorMessage: result.ErrorMessage,
+			})
+		}
+
+		// 构建钉钉消息
+		msg := dingNotifier.BuildMessage(cfg.Provider, dingResults)
+
+		// 转换为 JSON
+		jsonStr, err := dingNotifier.ToJSON(msg)
+		if err != nil {
+			logger.Error("Failed to build DingTalk message: %v", err)
+		} else {
+			// 输出到环境变量
+			if err := dingNotifier.OutputForEnv(jsonStr); err != nil {
+				logger.Error("Failed to output DingTalk message: %v", err)
+			} else {
+				logger.Info("DingTalk notification message prepared")
+			}
+		}
+	}
 
 	if failureCount > 0 || len(invalidEntries) > 0 {
 		os.Exit(1)

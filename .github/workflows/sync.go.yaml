@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       provider:
-        description: 'Provider to use (aliyun/huawei)'
+        description: 'Provider to use (aliyun/huawei/all)'
         required: true
-        default: 'aliyun'
+        default: 'all'
       image_list_file:
         description: 'Path to the image list file'
         required: true
@@ -18,12 +18,12 @@ on:
 
 env:
   IMAGE_LIST_FILE: ${{ github.event.inputs.image_list_file || 'images.txt' }}
-  PROVIDER: ${{ github.event.inputs.provider || 'aliyun' }}
 
 jobs:
-  sync:
-    name: Sync to ${{ github.event.inputs.provider || 'aliyun' }}
+  sync-aliyun:
+    name: Sync to Aliyun
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.provider == 'aliyun' || github.event.inputs.provider == 'all' || github.event_name == 'push' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -51,8 +51,9 @@ jobs:
 
       - name: Run sync
         env:
-          PROVIDER: ${{ env.PROVIDER }}
+          PROVIDER: aliyun
           IMAGE_LIST_FILE: ${{ env.IMAGE_LIST_FILE }}
+          DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
           ALIYUN_REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}
           ALIYUN_NAMESPACE: ${{ secrets.ALIYUN_NAME_SPACE }}
           ALIYUN_REGISTRY_USER: ${{ secrets.ALIYUN_REGISTRY_USER }}
@@ -63,16 +64,103 @@ jobs:
           HUAWEI_REGISTRY_PASSWORD: ${{ secrets.HUAWEI_REGISTRY_PASSWORD }}
         run: ./sync
 
-      # - name: Send email notification
-      #   if: always()
-      #   uses: dawidd6/action-send-mail@v3
-      #   with:
-      #     server_address: smtp.163.com
-      #     server_port: 465
-      #     username: ${{ secrets.EMAIL_USERNAME }}
-      #     password: ${{ secrets.EMAIL_PASSWORD }}
-      #     subject: Docker镜像同步完成通知
-      #     to: ${{ secrets.EMAIL_USERNAME }}
-      #     from: GitHub Actions
-      #     body: |
-      #       Docker镜像同步完成
+      - name: Send DingTalk Notification
+        if: always()
+        env:
+          DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
+        run: |
+          if [ -z "$DINGTALK_TOKEN" ]; then
+            echo "[WARN] DINGTALK_TOKEN not set, skipping DingTalk notification"
+            exit 0
+          fi
+          if [ -z "$DINGTALK_MESSAGE" ]; then
+            echo "[WARN] DINGTALK_MESSAGE not set, using default message"
+            DINGTALK_MESSAGE='{"msgtype": "markdown", "markdown": {"title": "镜像同步报告", "text": "## 🚀 镜像同步任务报告\n\n☁️ 镜像已是最新，无需操作\n\n*由 docker-image-sync 自动发送*"}}'
+          fi
+          echo "Sending DingTalk notification..."
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$DINGTALK_MESSAGE")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          if [ "$http_code" = "200" ]; then
+            echo "✅ DingTalk notification sent successfully"
+            echo "Response: $body"
+          else
+            echo "❌ Failed to send DingTalk notification"
+            echo "HTTP Code: $http_code"
+            echo "Response: $body"
+          fi
+
+  sync-huawei:
+    name: Sync to Huawei
+    runs-on: ubuntu-latest
+    needs: sync-aliyun
+    if: ${{ github.event.inputs.provider == 'huawei' || github.event.inputs.provider == 'all' || github.event_name == 'push' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install skopeo
+        run: |
+          curl -sL https://github.com/lework/skopeo-binary/releases/download/v1.14.2/skopeo-linux-amd64 -o /usr/local/bin/skopeo
+          chmod +x /usr/local/bin/skopeo
+          skopeo --version
+
+      - name: Get dependencies
+        run: |
+          go mod tidy
+          go mod download
+
+      - name: Build
+        run: |
+          BUILD_TIME=$(date +%Y-%m-%d_%H:%M:%S)
+          go build -ldflags "-X main.BuildTime=$BUILD_TIME" -o sync ./cmd/sync
+
+      - name: Run sync
+        env:
+          PROVIDER: huawei
+          IMAGE_LIST_FILE: ${{ env.IMAGE_LIST_FILE }}
+          DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
+          ALIYUN_REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}
+          ALIYUN_NAMESPACE: ${{ secrets.ALIYUN_NAME_SPACE }}
+          ALIYUN_REGISTRY_USER: ${{ secrets.ALIYUN_REGISTRY_USER }}
+          ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+          HUAWEI_REGISTRY: ${{ secrets.HUAWEI_REGISTRY }}
+          HUAWEI_NAMESPACE: ${{ secrets.HUAWEI_NAMESPACE }}
+          HUAWEI_REGISTRY_USER: ${{ secrets.HUAWEI_REGISTRY_USER }}
+          HUAWEI_REGISTRY_PASSWORD: ${{ secrets.HUAWEI_REGISTRY_PASSWORD }}
+        run: ./sync
+
+      - name: Send DingTalk Notification
+        if: always()
+        env:
+          DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
+        run: |
+          if [ -z "$DINGTALK_TOKEN" ]; then
+            echo "[WARN] DINGTALK_TOKEN not set, skipping DingTalk notification"
+            exit 0
+          fi
+          if [ -z "$DINGTALK_MESSAGE" ]; then
+            echo "[WARN] DINGTALK_MESSAGE not set, using default message"
+            DINGTALK_MESSAGE='{"msgtype": "markdown", "markdown": {"title": "镜像同步报告", "text": "## 🚀 镜像同步任务报告\n\n☁️ 镜像已是最新，无需操作\n\n*由 docker-image-sync 自动发送*"}}'
+          fi
+          echo "Sending DingTalk notification..."
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$DINGTALK_MESSAGE")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          if [ "$http_code" = "200" ]; then
+            echo "✅ DingTalk notification sent successfully"
+            echo "Response: $body"
+          else
+            echo "❌ Failed to send DingTalk notification"
+            echo "HTTP Code: $http_code"
+            echo "Response: $body"
+          fi
