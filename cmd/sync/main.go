@@ -231,51 +231,15 @@ func syncWithRetry(ctx context.Context, p provider.Provider, img string, timeout
 	return result
 }
 
-// showProgress 显示进度条（在单独的一行，不与日志混合）
+// showProgress 显示进度（简化版，避免与日志冲突）
 func showProgress(total int, progressChan <-chan struct{}) {
 	completed := 0
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	// 先打印一个空行，为进度条预留位置
-	fmt.Println()
-
-	for {
-		select {
-		case _, ok := <-progressChan:
-			if !ok {
-				// 通道关闭，显示最终进度
-				printProgressBar(total, total)
-				return
-			}
-			completed++
-			printProgressBar(completed, total)
-		case <-ticker.C:
-			// 定期刷新进度条
-			if completed < total {
-				printProgressBar(completed, total)
-			}
-		}
+	
+	for range progressChan {
+		completed++
+		// 只在完成时打印进度
+		fmt.Printf("Progress: %d/%d (%.1f%%)\n", completed, total, float64(completed)/float64(total)*100)
 	}
-}
-
-// printProgressBar 打印进度条（使用 ANSI 转义码清行）
-func printProgressBar(current, total int) {
-	width := 40
-	percent := float64(current) / float64(total)
-	filled := int(float64(width) * percent)
-
-	bar := ""
-	for i := 0; i < width; i++ {
-		if i < filled {
-			bar += "█"
-		} else {
-			bar += "░"
-		}
-	}
-
-	// \033[2K 清除整行，\033[G 移动到行首
-	fmt.Printf("\033[2K\033[G[%s] %d/%d (%.1f%%)", bar, current, total, percent*100)
 }
 
 // isRetryableError 判断错误是否可重试
