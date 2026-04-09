@@ -9,17 +9,14 @@ import (
 
 // ParsedImage 表示解析后的镜像信息
 type ParsedImage struct {
-	Name      string // 镜像名称（不含标签）
+	Registry  string // 如 docker.io
+	Namespace string // 如 library 或 jgraph
+	Name      string // 镜像名
 	Tag       string // 标签
-	Namespace string // 命名空间前缀（如果有）
 }
 
-// ParseImage 解析镜像地址，支持多种格式：
-//   - python:3.11-slim
-//   - nginx:latest
-//   - jgraph/drawio:latest
-//   - docker.io/library/nginx:latest
-//   - gcr.io/google-containers/pause:3.9
+// ParseImage 解析已标准化的镜像地址
+// 输入格式: docker.io/library/nginx:latest 或 docker.io/jgraph/drawio:latest
 func ParseImage(sourceImage string) ParsedImage {
 	// 移除 digest 部分 (@sha256:...)
 	if atIdx := strings.Index(sourceImage, "@"); atIdx != -1 {
@@ -27,54 +24,52 @@ func ParseImage(sourceImage string) ParsedImage {
 	}
 
 	// 解析镜像名称和标签
-	var imageName, tag string
+	var imageRef, tag string
 	if colonIdx := strings.LastIndex(sourceImage, ":"); colonIdx != -1 {
-		// 检查是否是端口（如 localhost:5000/image）
+		// 确保 : 不是端口的一部分
 		afterColon := sourceImage[colonIdx+1:]
 		if !strings.Contains(afterColon, "/") {
-			imageName = sourceImage[:colonIdx]
+			imageRef = sourceImage[:colonIdx]
 			tag = afterColon
 		} else {
-			imageName = sourceImage
+			imageRef = sourceImage
 			tag = "latest"
 		}
 	} else {
-		imageName = sourceImage
+		imageRef = sourceImage
 		tag = "latest"
 	}
 
-	// 分割路径获取镜像名和命名空间
-	parts := strings.Split(imageName, "/")
-	var namePart string
-	var namespaceParts []string
+	// 分割路径
+	parts := strings.Split(imageRef, "/")
+	
+	result := ParsedImage{
+		Tag: tag,
+	}
 
-	if len(parts) == 1 {
-		// 只有镜像名，如 "nginx"
-		namePart = parts[0]
-	} else if len(parts) == 2 {
-		// 可能是 "jgraph/drawio"
-		if !strings.Contains(parts[1], ":") {
-			namespaceParts = []string{parts[0]}
-			namePart = parts[1]
+	switch len(parts) {
+	case 1:
+		// 只有镜像名
+		result.Name = parts[0]
+	case 2:
+		// registry/name 或 namespace/name
+		if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
+			result.Registry = parts[0]
+			result.Name = parts[1]
 		} else {
-			namePart = parts[0]
+			result.Namespace = parts[0]
+			result.Name = parts[1]
 		}
-	} else {
-		// 多个部分，如 "docker.io/library/nginx" 或 "gcr.io/google-containers/pause"
-		namePart = parts[len(parts)-1]
-		namespaceParts = parts[1 : len(parts)-1]
+	default:
+		// registry/namespace/name/.../name
+		result.Registry = parts[0]
+		result.Name = parts[len(parts)-1]
+		if len(parts) > 2 {
+			result.Namespace = strings.Join(parts[1:len(parts)-1], "_")
+		}
 	}
 
-	namespace := ""
-	if len(namespaceParts) > 0 {
-		namespace = strings.Join(namespaceParts, "_")
-	}
-
-	return ParsedImage{
-		Name:      namePart,
-		Tag:       tag,
-		Namespace: namespace,
-	}
+	return result
 }
 
 // BuildTargetImage 构建目标镜像地址

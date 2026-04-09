@@ -20,15 +20,35 @@ func main() {
 		log.Fatalf("Failed to load image list: %v", err)
 	}
 
-	providerImages := images.GetImages(cfg.Provider)
-	totalImages := len(providerImages)
+	// 获取镜像条目（包含元数据）
+	entries := images.GetEntries(cfg.Provider)
+	totalEntries := len(entries)
 
-	if totalImages == 0 {
+	if totalEntries == 0 {
 		fmt.Printf("No images found for provider: %s\n", cfg.Provider)
 		os.Exit(0)
 	}
 
-	fmt.Printf("Loaded %d images for provider: %s\n", totalImages, cfg.Provider)
+	// 检查并报告无效的镜像条目
+	invalidEntries := images.GetInvalidEntries(cfg.Provider)
+	if len(invalidEntries) > 0 {
+		fmt.Printf("Warning: Found %d invalid image entries:\n", len(invalidEntries))
+		for _, entry := range invalidEntries {
+			fmt.Printf("  - %s: %s\n", entry.Raw, entry.ErrorMsg)
+		}
+		fmt.Println()
+	}
+
+	// 获取有效的镜像地址列表
+	providerImages := images.GetImages(cfg.Provider)
+	totalImages := len(providerImages)
+
+	if totalImages == 0 {
+		fmt.Printf("No valid images to sync for provider: %s\n", cfg.Provider)
+		os.Exit(0)
+	}
+
+	fmt.Printf("Loaded %d valid images for provider: %s\n", totalImages, cfg.Provider)
 
 	factory := provider.NewProviderFactory()
 	p, err := factory.Create(cfg.Provider, cfg.Registry, cfg.Namespace, cfg.Username, cfg.Password)
@@ -94,13 +114,17 @@ func main() {
 	fmt.Println("Sync Summary")
 	fmt.Println("========================================")
 	fmt.Printf("Provider: %s\n", cfg.Provider)
-	fmt.Printf("Total: %d\n", totalImages)
+	fmt.Printf("Total Entries: %d\n", totalEntries)
+	fmt.Printf("Valid Images: %d\n", totalImages)
+	if len(invalidEntries) > 0 {
+		fmt.Printf("Invalid Entries: %d\n", len(invalidEntries))
+	}
 	fmt.Printf("Success: %d\n", successCount)
 	fmt.Printf("Skipped: %d\n", skippedCount)
 	fmt.Printf("Failed: %d\n", failureCount)
 	fmt.Println("========================================")
 
-	if failureCount > 0 {
+	if failureCount > 0 || len(invalidEntries) > 0 {
 		os.Exit(1)
 	}
 }
