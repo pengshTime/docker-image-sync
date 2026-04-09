@@ -73,12 +73,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Fetching workflow runs..."
-          # 获取所有已完成的运行记录（排除当前正在运行的）
+          # 获取所有运行记录（排除当前这次）
+          current_run_id=${{ github.run_id }}
           runs=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs?status=completed&per_page=100" | \
-            jq -r '.workflow_runs[] | select(.id != ${{ github.run_id }}) | .id')
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=100" | \
+            jq -r ".workflow_runs[] | select(.id != $current_run_id) | .id")
           
-          # 删除所有旧记录
+          # 删除所有旧记录，只保留当前这次
           count=0
           for run_id in $runs; do
             echo "Deleting run $run_id..."
@@ -87,4 +88,4 @@ jobs:
             count=$((count + 1))
           done
           
-          echo "Deleted $count old workflow runs"
+          echo "Deleted $count old workflow runs, keeping only current run ($current_run_id)"
