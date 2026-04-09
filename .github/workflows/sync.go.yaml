@@ -11,6 +11,10 @@ on:
         description: 'Path to the image list file'
         required: true
         default: 'images.txt'
+  push:
+    branches: [ main ]
+    paths:
+      - 'images.txt'
 
 env:
   IMAGE_LIST_FILE: ${{ github.event.inputs.image_list_file || 'images.txt' }}
