@@ -1,0 +1,36 @@
+# 本地使用说明文件
+使用说明.txt
+
+# Go 编译输出
+*.exe
+*.dll
+*.so
+*.dylib
+sync
+
+# 测试输出
+*.test
+*.out
+
+# 依赖目录
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+
+# 邮件报告（本地生成）
+email_report.txt
+email_report.html
