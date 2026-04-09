@@ -231,11 +231,14 @@ func syncWithRetry(ctx context.Context, p provider.Provider, img string, timeout
 	return result
 }
 
-// showProgress 显示进度条
+// showProgress 显示进度条（在单独的一行，不与日志混合）
 func showProgress(total int, progressChan <-chan struct{}) {
 	completed := 0
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+
+	// 先打印一个空行，为进度条预留位置
+	fmt.Println()
 
 	for {
 		select {
@@ -243,7 +246,6 @@ func showProgress(total int, progressChan <-chan struct{}) {
 			if !ok {
 				// 通道关闭，显示最终进度
 				printProgressBar(total, total)
-				fmt.Println() // 换行
 				return
 			}
 			completed++
@@ -257,7 +259,7 @@ func showProgress(total int, progressChan <-chan struct{}) {
 	}
 }
 
-// printProgressBar 打印进度条
+// printProgressBar 打印进度条（使用 ANSI 转义码清行）
 func printProgressBar(current, total int) {
 	width := 40
 	percent := float64(current) / float64(total)
@@ -272,7 +274,8 @@ func printProgressBar(current, total int) {
 		}
 	}
 
-	fmt.Printf("\r[%s] %d/%d (%.1f%%)", bar, current, total, percent*100)
+	// \033[2K 清除整行，\033[G 移动到行首
+	fmt.Printf("\033[2K\033[G[%s] %d/%d (%.1f%%)", bar, current, total, percent*100)
 }
 
 // isRetryableError 判断错误是否可重试
