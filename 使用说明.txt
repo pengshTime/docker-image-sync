@@ -1,0 +1,62 @@
+Docker 镜像同步工具 - 使用说明
+================================
+
+📦 使用 GitHub Actions 将 Docker 镜像从 DockerHub 同步到阿里云容器镜像服务（ACR）
+
+
+使用步骤
+--------
+
+1. 修改 images.txt
+   添加或删除需要同步的镜像，每行一个镜像地址
+
+2. 提交并推送
+   git add images.txt
+   git commit -m "update images"
+   git push
+
+3. 自动触发工作流
+   GitHub Actions 检测到 images.txt 变更后自动开始同步
+
+4. 接收邮件通知
+   同步完成后自动发送详细报告到配置的邮箱
+
+
+镜像格式示例
+------------
+
+# Docker镜像列表
+# 格式说明：按云商分组，每行一个镜像地址
+# 支持的云商: aliyun
+
+[aliyun]
+jgraph/drawio:latest
+corentinth/it-tools:latest
+fnsys/dockhand:latest
+
+
+注意事项
+--------
+
+- 镜像格式：name:tag，例如 nginx:latest
+- 支持多架构镜像，会自动同步所有平台版本
+- 已存在的镜像会自动跳过，避免重复同步
+- 同步失败会自动重试 3 次
+
+
+触发方式
+--------
+
+方式一：修改 images.txt 自动触发（推荐）
+  直接修改 images.txt 文件并推送到 main 分支
+
+方式二：手动触发
+  进入 GitHub 仓库 → Actions → Sync Docker Images → Run workflow
+
+
+查看结果
+--------
+
+- GitHub Actions 页面查看实时日志
+- 邮箱接收同步完成通知
+- 通知包含：已同步、已跳过、失败的镜像列表
