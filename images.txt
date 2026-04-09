@@ -1,11 +1,8 @@
 # Docker镜像列表
 # 格式说明：按云商分组，每行一个镜像地址
-# 支持的云商: aliyun, huawei
+# 支持的云商: aliyun
 
 [aliyun]
 jgraph/drawio:latest
 corentinth/it-tools:latest
 fnsys/dockhand:latest
-
-[huawei]
-python:3.11-slim

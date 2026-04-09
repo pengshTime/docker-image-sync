@@ -14,8 +14,6 @@ func (f *ProviderFactory) Create(providerType string, registry, namespace, usern
 	switch providerType {
 	case "aliyun", "acr":
 		return NewAliyunProvider(registry, namespace, username, password), nil
-	case "huawei", "swr":
-		return NewHuaweiProvider(registry, namespace, username, password), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", providerType)
 	}

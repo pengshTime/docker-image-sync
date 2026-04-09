@@ -17,13 +17,7 @@ type Config struct {
 func Load() *Config {
 	provider := getEnv("PROVIDER", "aliyun")
 
-	var prefix string
-	switch provider {
-	case "huawei", "swr":
-		prefix = "HUAWEI"
-	default:
-		prefix = "ALIYUN"
-	}
+	prefix := "ALIYUN"
 
 	return &Config{
 		Provider:  provider,
