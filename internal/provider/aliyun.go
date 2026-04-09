@@ -79,15 +79,43 @@ func (p *AliyunProvider) CheckImageExists(ctx context.Context, image string) (bo
 	return true, nil
 }
 
+// buildTargetImage 构建目标镜像地址
+// 支持多种镜像格式：
+//   - python:3.11-slim -> registry/namespace/python:3.11-slim
+//   - nginx:latest -> registry/namespace/nginx:latest
+//   - jgraph/drawio:latest -> registry/namespace/drawio:latest (阿里云不需要前缀)
+//   - docker.io/library/nginx:latest -> registry/namespace/nginx:latest
 func (p *AliyunProvider) buildTargetImage(sourceImage string) string {
-	parts := strings.Split(sourceImage, "/")
-	imageNameTag := parts[len(parts)-1]
-
-	if tagParts := strings.Split(imageNameTag, "@"); len(tagParts) > 1 {
-		imageNameTag = tagParts[0]
+	// 移除 digest 部分 (@sha256:...)
+	if atIdx := strings.Index(sourceImage, "@"); atIdx != -1 {
+		sourceImage = sourceImage[:atIdx]
 	}
 
-	return fmt.Sprintf("%s/%s/%s", p.registry, p.namespace, imageNameTag)
+	// 解析镜像名称和标签
+	var imageName, tag string
+	if colonIdx := strings.LastIndex(sourceImage, ":"); colonIdx != -1 {
+		// 检查是否是端口（如 localhost:5000/image）
+		afterColon := sourceImage[colonIdx+1:]
+		if !strings.Contains(afterColon, "/") {
+			imageName = sourceImage[:colonIdx]
+			tag = afterColon
+		} else {
+			imageName = sourceImage
+			tag = "latest"
+		}
+	} else {
+		imageName = sourceImage
+		tag = "latest"
+	}
+
+	// 分割路径获取镜像名
+	parts := strings.Split(imageName, "/")
+	namePart := parts[len(parts)-1]
+
+	if tag != "" && tag != "latest" {
+		return fmt.Sprintf("%s/%s/%s:%s", p.registry, p.namespace, namePart, tag)
+	}
+	return fmt.Sprintf("%s/%s/%s", p.registry, p.namespace, namePart)
 }
 
 func (p *AliyunProvider) login() error {

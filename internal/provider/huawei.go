@@ -79,29 +79,73 @@ func (p *HuaweiProvider) CheckImageExists(ctx context.Context, image string) (bo
 	return true, nil
 }
 
+// buildTargetImage 构建目标镜像地址
+// 支持多种镜像格式：
+//   - python:3.11-slim -> registry/namespace/python:3.11-slim
+//   - nginx:latest -> registry/namespace/nginx:latest
+//   - jgraph/drawio:latest -> registry/namespace/jgraph_drawio:latest
+//   - docker.io/library/nginx:latest -> registry/namespace/nginx:latest
+//   - gcr.io/google-containers/pause:3.9 -> registry/namespace/google-containers_pause:3.9
 func (p *HuaweiProvider) buildTargetImage(sourceImage string) string {
-	slashParts := strings.Split(sourceImage, "/")
-	imageNameTag := slashParts[len(slashParts)-1]
-
-	if tagParts := strings.Split(imageNameTag, "@"); len(tagParts) > 1 {
-		imageNameTag = tagParts[0]
+	// 移除 digest 部分 (@sha256:...)
+	if atIdx := strings.Index(sourceImage, "@"); atIdx != -1 {
+		sourceImage = sourceImage[:atIdx]
 	}
 
-	var namespacePrefix string
-	if len(slashParts) > 2 {
-		namespacePrefix = slashParts[len(slashParts)-2]
-	} else if len(slashParts) == 2 {
-		namespacePrefix = slashParts[0]
-	}
-
-	var fullImageName string
-	if namespacePrefix != "" {
-		fullImageName = fmt.Sprintf("%s_%s", namespacePrefix, imageNameTag)
+	// 解析镜像名称和标签
+	var imageName, tag string
+	if colonIdx := strings.LastIndex(sourceImage, ":"); colonIdx != -1 {
+		// 检查是否是端口（如 localhost:5000/image）
+		afterColon := sourceImage[colonIdx+1:]
+		if !strings.Contains(afterColon, "/") {
+			imageName = sourceImage[:colonIdx]
+			tag = afterColon
+		} else {
+			imageName = sourceImage
+			tag = "latest"
+		}
 	} else {
-		fullImageName = imageNameTag
+		imageName = sourceImage
+		tag = "latest"
 	}
 
-	return fmt.Sprintf("%s/%s/%s", p.registry, p.namespace, fullImageName)
+	// 分割路径获取镜像名和命名空间
+	parts := strings.Split(imageName, "/")
+	var namePart string
+	var namespaceParts []string
+
+	if len(parts) == 1 {
+		// 只有镜像名，如 "nginx"
+		namePart = parts[0]
+	} else if len(parts) == 2 {
+		// 可能是 "nginx:latest" 被错误分割，或 "jgraph/drawio"
+		if strings.Contains(parts[1], ":") {
+			// 是 "nginx:latest" 格式，不应该在这里出现
+			namePart = parts[0]
+		} else {
+			// 是 "jgraph/drawio" 格式
+			namespaceParts = []string{parts[0]}
+			namePart = parts[1]
+		}
+	} else {
+		// 多个部分，如 "docker.io/library/nginx" 或 "gcr.io/google-containers/pause"
+		// 取最后一部分作为镜像名，中间部分作为命名空间
+		namePart = parts[len(parts)-1]
+		namespaceParts = parts[1 : len(parts)-1]
+	}
+
+	// 构建目标镜像名
+	var targetImageName string
+	if len(namespaceParts) > 0 {
+		targetImageName = strings.Join(namespaceParts, "_") + "_" + namePart
+	} else {
+		targetImageName = namePart
+	}
+
+	if tag != "" && tag != "latest" {
+		return fmt.Sprintf("%s/%s/%s:%s", p.registry, p.namespace, targetImageName, tag)
+	}
+	return fmt.Sprintf("%s/%s/%s", p.registry, p.namespace, targetImageName)
 }
 
 func (p *HuaweiProvider) login() error {
