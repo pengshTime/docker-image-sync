@@ -6,4 +6,4 @@
 jgraph/drawio:latest
 corentinth/it-tools:latest
 fnsys/dockhand:latest
-homepage:latest
+ghcr.io/gethomepage/homepage:latest
