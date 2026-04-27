@@ -3,7 +3,4 @@
 # 支持的云商: aliyun
 
 [aliyun]
-jgraph/drawio:latest
-corentinth/it-tools:latest
-fnsys/dockhand:latest
-ghcr.io/gethomepage/homepage:latest
+casaos/casaos:latest
