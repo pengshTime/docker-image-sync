@@ -37,6 +37,7 @@
 
 ```bash
 python scripts/images.py pull          # 远端 images.txt -> 本地
+python scripts/images.py pull --force  # 本地与远端不一致时强行覆盖（默认会拒绝，防丢改动）
 ```
 
 按以下格式添加镜像：
@@ -89,9 +90,16 @@ GitHub 账号（也可用 `--token` 或环境变量 `GITHUB_TOKEN` 覆盖）。�
 | 变量名 | 默认值 | 说明 |
 |-------|--------|------|
 | `LOG_LEVEL` | `INFO` | 日志级别 (DEBUG/INFO/WARN/ERROR) |
-| `SYNC_TIMEOUT` | `300` | 单个镜像同步超时时间（秒） |
+| `SYNC_TIMEOUT` | `900` | 单个镜像同步超时时间（秒），失败重试的等待按 1s/2s/4s… 递增并封顶 30s |
 | `MAX_RETRIES` | `3` | 失败重试次数 |
 | `CONCURRENCY` | `3` | 并发同步数量 |
+| `PREFERRED_ARCH` | 空 | 留空用 `skopeo copy --all --format docker` 保留多架构；设为 `amd64` 等值则只同步该单一架构。**如果 ACR 拒绝多架构镜像（OCI/docker index），把它设为 `amd64` 即可回退老行为，不用改代码** |
+
+其他说明：
+
+- 单个 job 硬超时 120 分钟，同一时间只允许一个同步在跑（后触发的会排队而不是并发）。
+- 带 `@sha256:` 的条目会被判定为无效并报错，因为按 digest 锁定会被静默降级成按 tag 同步。
+- Actions 运行记录保留最近 5 次（加当前这次），更早的由 workflow 清理。
 
 ## 📄 开源协议
 

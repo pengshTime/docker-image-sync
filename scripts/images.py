@@ -69,13 +69,21 @@ def detect_repo() -> tuple[str, str]:
 
 
 def detect_branch() -> str:
-    override = os.environ.get("GIT_BRANCH")
-    if override:
-        return override
     try:
         return run_git("rev-parse", "--abbrev-ref", "HEAD")
     except (RuntimeError, FileNotFoundError):
         return "main"
+
+
+def resolve_branch(owner, repo, token, explicit: str | None) -> str:
+    """默认用仓库的默认分支：本地可能在别的分支上开发，直接提交到那里会让同步找不到列表。"""
+    if explicit:
+        return explicit
+    override = os.environ.get("GIT_BRANCH")
+    if override:
+        return override
+    response = request("GET", f"/repos/{owner}/{repo}", token)
+    return response.get("default_branch") or detect_branch()
 
 
 def get_token(explicit: str | None) -> str:
@@ -302,6 +310,11 @@ def cmd_pull(args, owner, repo, branch, token):
     content, sha = fetch_list(owner, repo, branch, args.list, token)
     if content is None:
         die(f"远端 {branch} 分支上没有 {args.list}")
+    if os.path.exists(args.local_list) and not args.force:
+        with open(args.local_list, encoding="utf-8") as handle:
+            if handle.read() != content:
+                die(f"本地 {args.local_list} 和远端不一致，覆盖会丢掉本地改动。"
+                    f"自己 diff 之后再拉取请加 --force")
     with open(args.local_list, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(content)
     out(f"已拉取 {owner}/{repo}:{args.list} -> {args.local_list}（{len(content.splitlines())} 行, sha={sha[:8]}）")
@@ -365,18 +378,19 @@ def main(argv=None):
     parser.add_argument("command", nargs="?", choices=["pull", "push", "status", "watch"], default="pull")
     parser.add_argument("--list", default=DEFAULT_LIST, help=f"列表文件名，默认 {DEFAULT_LIST}")
     parser.add_argument("--repo", help="owner/name，默认从 git origin 解析")
-    parser.add_argument("--ref", help="分支，默认当前分支")
+    parser.add_argument("--ref", help="分支，默认仓库默认分支")
     parser.add_argument("--token", help="GitHub token，默认复用 git 凭据或环境变量")
     parser.add_argument("-m", "--message", help="提交说明，默认 Update images.txt")
     parser.add_argument("--no-run", action="store_true", help="push 时只提交不触发同步")
+    parser.add_argument("--force", action="store_true", help="pull 时允许覆盖与远端不同的本地文件")
     parser.add_argument("--limit", type=int, default=5, help="status 显示的运行条数")
     parser.add_argument("run_id", nargs="?", help="status/watch 指定的 run id")
     args = parser.parse_args(argv)
 
     args.local_list = local_path(args.list)
     owner, repo = (args.repo.split("/", 1) if args.repo else detect_repo())
-    branch = args.ref or detect_branch()
     token = get_token(args.token)
+    branch = resolve_branch(owner, repo, token, args.ref)
 
     handlers = {"pull": cmd_pull, "push": cmd_push, "status": cmd_status, "watch": cmd_watch}
     handlers[args.command](args, owner, repo, branch, token)
