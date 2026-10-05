@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,10 @@ func main() {
 	logger.Init(logLevel)
 
 	logger.Info("Starting docker-image-sync v%s", Version)
+
+	if missing := cfg.MissingCredentials(); len(missing) > 0 {
+		logger.Fatal("Missing required environment variables: %v", missing)
+	}
 
 	images, err := image.LoadFromFile(cfg.ImageList)
 	if err != nil {
@@ -118,23 +123,11 @@ func main() {
 	logger.Info("Login successful")
 
 	// 获取超时配置（默认300秒=5分钟）
-	timeoutSec := 300
-	if t := os.Getenv("SYNC_TIMEOUT"); t != "" {
-		if parsed, err := fmt.Sscanf(t, "%d", &timeoutSec); err != nil || parsed != 1 {
-			logger.Warn("Invalid SYNC_TIMEOUT value: %s, using default 300s", t)
-			timeoutSec = 300
-		}
-	}
+	timeoutSec := envInt("SYNC_TIMEOUT", 300)
 	logger.Debug("Using sync timeout: %ds", timeoutSec)
 
 	// 获取重试次数（默认3次）
-	maxRetries := 3
-	if r := os.Getenv("MAX_RETRIES"); r != "" {
-		if parsed, err := fmt.Sscanf(r, "%d", &maxRetries); err != nil || parsed != 1 {
-			logger.Warn("Invalid MAX_RETRIES value: %s, using default 3", r)
-			maxRetries = 3
-		}
-	}
+	maxRetries := envInt("MAX_RETRIES", 3)
 	logger.Debug("Using max retries: %d", maxRetries)
 
 	ctx := context.Background()
@@ -152,7 +145,11 @@ func main() {
 	progressChan := make(chan struct{}, totalImages)
 	go showProgress(totalImages, progressChan)
 
-	concurrency := 3
+	concurrency := envInt("CONCURRENCY", 3)
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	logger.Info("Using concurrency: %d", concurrency)
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
@@ -210,87 +207,56 @@ func main() {
 	logger.Info("Failed: %d", failureCount)
 	logger.Info("========================================")
 
-	// 生成邮件内容文件
-	generateEmailReport(cfg.Provider, successImages, skippedImages, failedImages)
+	// 生成同步报告，写入 GITHUB_STEP_SUMMARY 供 Actions 页面和本地脚本读取
+	writeReport(cfg.Provider, successImages, skippedImages, failedImages)
 
 	if failureCount > 0 || len(invalidEntries) > 0 {
 		os.Exit(1)
 	}
 }
 
-// generateEmailReport 生成邮件报告文件（纯文本格式，方便复制）
-func generateEmailReport(provider string, successImages, skippedImages, failedImages []string) {
+// writeReport 把结果写入 $GITHUB_STEP_SUMMARY；本地运行时输出到 stdout
+func writeReport(provider string, successImages, skippedImages, failedImages []string) {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Docker镜像同步任务已完成\n\n"))
-	sb.WriteString(fmt.Sprintf("提供商: 阿里云 (%s)\n", provider))
-	sb.WriteString(fmt.Sprintf("时间: %s\n\n", time.Now().Format("2006-01-02 15:04:05")))
+	sb.WriteString("## Docker 镜像同步结果\n\n")
+	sb.WriteString(fmt.Sprintf("- Provider: %s\n", provider))
+	sb.WriteString(fmt.Sprintf("- 总计: %d，同步: %d，跳过: %d，失败: %d\n\n",
+		len(successImages)+len(skippedImages)+len(failedImages),
+		len(successImages), len(skippedImages), len(failedImages)))
 
-	// 统计摘要
-	total := len(successImages) + len(skippedImages) + len(failedImages)
-	sb.WriteString(fmt.Sprintf("总计: %d 个镜像\n", total))
-	sb.WriteString(fmt.Sprintf("- 已同步: %d\n", len(successImages)))
-	sb.WriteString(fmt.Sprintf("- 已跳过: %d\n", len(skippedImages)))
-	sb.WriteString(fmt.Sprintf("- 失败: %d\n\n", len(failedImages)))
-
-	// 已同步
-	if len(successImages) > 0 {
-		sb.WriteString("[已同步]\n")
-		for _, img := range successImages {
-			parts := strings.Split(img, " -> ")
-			if len(parts) == 2 {
-				sb.WriteString(fmt.Sprintf("  ✓ %s\n", parts[0]))
-				sb.WriteString(fmt.Sprintf("    %s\n", parts[1]))
-			} else {
-				sb.WriteString(fmt.Sprintf("  ✓ %s\n", img))
-			}
+	for _, section := range []struct {
+		title string
+		items []string
+	}{
+		{"已同步", successImages},
+		{"已跳过（目标已存在）", skippedImages},
+		{"失败", failedImages},
+	} {
+		if len(section.items) == 0 {
+			continue
+		}
+		sb.WriteString("### " + section.title + "\n\n")
+		for _, img := range section.items {
+			sb.WriteString("- " + img + "\n")
 		}
 		sb.WriteString("\n")
 	}
 
-	// 已跳过
-	if len(skippedImages) > 0 {
-		sb.WriteString("[已跳过]\n")
-		for _, img := range skippedImages {
-			parts := strings.Split(img, " -> ")
-			if len(parts) == 2 {
-				sb.WriteString(fmt.Sprintf("  ⏭ %s\n", parts[0]))
-				sb.WriteString(fmt.Sprintf("    %s\n", parts[1]))
-			} else {
-				sb.WriteString(fmt.Sprintf("  ⏭ %s\n", img))
-			}
-		}
-		sb.WriteString("\n")
+	markdown := sb.String()
+	summaryFile := os.Getenv("GITHUB_STEP_SUMMARY")
+	if summaryFile == "" {
+		fmt.Print(markdown)
+		return
 	}
-
-	// 失败
-	if len(failedImages) > 0 {
-		sb.WriteString("[失败]\n")
-		for _, img := range failedImages {
-			// 失败信息格式: source -> target: error
-			parts := strings.Split(img, " -> ")
-			if len(parts) == 2 {
-				targetAndError := strings.SplitN(parts[1], ": ", 2)
-				if len(targetAndError) == 2 {
-					sb.WriteString(fmt.Sprintf("  ✗ %s\n", parts[0]))
-					sb.WriteString(fmt.Sprintf("    %s\n", targetAndError[0]))
-					sb.WriteString(fmt.Sprintf("    错误: %s\n", targetAndError[1]))
-				} else {
-					sb.WriteString(fmt.Sprintf("  ✗ %s\n", img))
-				}
-			} else {
-				sb.WriteString(fmt.Sprintf("  ✗ %s\n", img))
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// 写入文件
-	err := os.WriteFile("email_report.txt", []byte(sb.String()), 0644)
+	file, err := os.OpenFile(summaryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		logger.Error("Failed to write email report: %v", err)
-	} else {
-		logger.Info("Email report saved to email_report.txt")
+		logger.Error("Failed to open step summary: %v", err)
+		return
+	}
+	defer file.Close()
+	if _, err := file.WriteString(markdown); err != nil {
+		logger.Error("Failed to write step summary: %v", err)
 	}
 }
 
@@ -399,6 +365,20 @@ func containsAny(s string, substrs []string) bool {
 	return false
 }
 
+// envInt 读取整数环境变量，无效或缺失时返回默认值
+func envInt(key string, defaultValue int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		logger.Warn("Invalid %s value: %s, using default %d", key, raw, defaultValue)
+		return defaultValue
+	}
+	return value
+}
+
 func printHelp() {
 	fmt.Println("docker-image-sync - Sync Docker images to cloud registries")
 	fmt.Println("")
@@ -409,10 +389,11 @@ func printHelp() {
 	fmt.Println("  -help       Show this help message")
 	fmt.Println("")
 	fmt.Println("Environment Variables:")
-	fmt.Println("  PROVIDER              Cloud provider (aliyun/huawei)")
+	fmt.Println("  PROVIDER              Cloud provider (aliyun)")
 	fmt.Println("  LOG_LEVEL             Log level (DEBUG/INFO/WARN/ERROR), default: INFO")
 	fmt.Println("  SYNC_TIMEOUT          Sync timeout in seconds, default: 300 (5 minutes)")
 	fmt.Println("  MAX_RETRIES           Max retry attempts, default: 3")
+	fmt.Println("  CONCURRENCY           Parallel sync count, default: 3")
 	fmt.Println("  IMAGE_LIST_FILE       Path to image list file, default: images.txt")
 	fmt.Println("")
 	fmt.Println("Provider specific variables:")

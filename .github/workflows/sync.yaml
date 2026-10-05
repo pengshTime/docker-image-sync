@@ -3,21 +3,17 @@ name: Sync Docker Images
 on:
   workflow_dispatch:
     inputs:
-      provider:
-        description: 'Provider to use (aliyun)'
-        required: true
-        default: 'aliyun'
       image_list_file:
         description: 'Path to the image list file'
         required: true
         default: 'images.txt'
-  push:
-    branches: [ main ]
-    paths:
-      - 'images.txt'
 
 env:
   IMAGE_LIST_FILE: ${{ github.event.inputs.image_list_file || 'images.txt' }}
+  LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+  SYNC_TIMEOUT: ${{ vars.SYNC_TIMEOUT }}
+  MAX_RETRIES: ${{ vars.MAX_RETRIES }}
+  CONCURRENCY: ${{ vars.CONCURRENCY }}
 
 jobs:
   sync-aliyun:
@@ -38,11 +34,6 @@ jobs:
           chmod +x /usr/local/bin/skopeo
           skopeo --version
 
-      - name: Get dependencies
-        run: |
-          go mod tidy
-          go mod download
-
       - name: Build
         run: |
           BUILD_TIME=$(date +%Y-%m-%d_%H:%M:%S)
@@ -51,25 +42,11 @@ jobs:
       - name: Run sync
         env:
           PROVIDER: aliyun
-          IMAGE_LIST_FILE: ${{ env.IMAGE_LIST_FILE }}
           ALIYUN_REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}
           ALIYUN_NAMESPACE: ${{ secrets.ALIYUN_NAME_SPACE }}
           ALIYUN_REGISTRY_USER: ${{ secrets.ALIYUN_REGISTRY_USER }}
           ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
         run: ./sync
-
-      - name: Send Email Notification
-        if: always()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.163.com
-          server_port: 465
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: Docker镜像同步完成通知 - ${{ job.status }}
-          to: ${{ secrets.EMAIL_USERNAME }}
-          from: GitHub Actions
-          body: file://email_report.txt
 
       - name: Delete Old Workflow Runs
         if: always()
@@ -82,7 +59,7 @@ jobs:
           runs=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=100" | \
             jq -r ".workflow_runs[] | select(.id != $current_run_id) | .id")
-          
+
           # 删除所有旧记录，只保留当前这次
           count=0
           for run_id in $runs; do
@@ -91,5 +68,5 @@ jobs:
               "https://api.github.com/repos/${{ github.repository }}/actions/runs/$run_id"
             count=$((count + 1))
           done
-          
+
           echo "Deleted $count old workflow runs, keeping only current run ($current_run_id)"

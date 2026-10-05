@@ -6,7 +6,7 @@
 *.dll
 *.so
 *.dylib
-sync
+/sync
 
 # 测试输出
 *.test
@@ -30,7 +30,3 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
-
-# 邮件报告（本地生成）
-email_report.txt
-email_report.html

@@ -146,22 +146,38 @@ func checkImageExists(ctx context.Context, image string) (bool, error) {
 	return true, nil
 }
 
-// dockerLogin 执行 docker login
-func dockerLogin(registry, username, password string) error {
-	cmd := exec.Command("bash", "-c",
-		fmt.Sprintf("echo '%s' | skopeo login --username '%s' --password-stdin %s",
-			password, username, registry))
-	return cmd.Run()
-}
-
-// skopeoCopy 复制镜像
+// skopeoCopy 复制镜像（--all 保留多架构 manifest list）
 func skopeoCopy(ctx context.Context, source, target string) error {
 	cmd := exec.CommandContext(ctx, "skopeo", "copy",
-		"--override-arch", "amd64",
-		"--override-os", "linux",
+		"--all",
 		"--src-tls-verify=true",
 		"--dest-tls-verify=true",
 		fmt.Sprintf("docker://%s", source),
 		fmt.Sprintf("docker://%s", target))
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, tail(output))
+	}
+	return nil
+}
+
+// dockerLogin 使用 skopeo login，密码通过 stdin 传入，避免出现在命令行参数和进程列表中
+func dockerLogin(registry, username, password string) error {
+	cmd := exec.Command("skopeo", "login", "--username", username, "--password-stdin", registry)
+	cmd.Stdin = strings.NewReader(password)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, tail(output))
+	}
+	return nil
+}
+
+// tail 截断过长的命令输出，保留末尾的错误信息
+func tail(output []byte) string {
+	const maxLen = 512
+	s := strings.TrimSpace(string(output))
+	if len(s) <= maxLen {
+		return s
+	}
+	return "..." + s[len(s)-maxLen:]
 }
