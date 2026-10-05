@@ -111,9 +111,9 @@ func normalizeImageRef(image string) (string, error) {
 		return "", fmt.Errorf("empty image reference")
 	}
 
-	// 移除 digest 部分
+	// 带 digest 的写法会被静默降级成按 tag 同步，实际拉到的不是锁定的那个版本，直接拒绝
 	if atIdx := strings.Index(image, "@"); atIdx != -1 {
-		image = image[:atIdx]
+		return "", fmt.Errorf("%s uses a digest; pin by tag instead of @sha256:...", image)
 	}
 
 	// 检查是否包含 registry（通过判断是否有 "." 或 ":" 在第一个 "/" 之前）
@@ -238,16 +238,18 @@ func (il *ImageList) GetImagesWithDeduplication(currentProvider string) []string
 		}
 	}
 
-	// 过滤掉已在其他云商中存在的镜像
+	// 过滤掉已在其他云商中存在的镜像，以及同一云商内重复的条目
 	var uniqueImages []string
+	seen := make(map[string]bool)
 	for _, entry := range currentEntries {
 		if !entry.Valid {
 			continue
 		}
-		if otherProvidersImages[entry.Source] {
-			// 镜像已在其他云商中存在，跳过
+		if otherProvidersImages[entry.Source] || seen[entry.Source] {
+			// 镜像已在其他云商中存在，或本云商内已经排过
 			continue
 		}
+		seen[entry.Source] = true
 		uniqueImages = append(uniqueImages, entry.Source)
 	}
 

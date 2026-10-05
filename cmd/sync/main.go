@@ -122,8 +122,8 @@ func main() {
 	}
 	logger.Info("Login successful")
 
-	// 获取超时配置（默认300秒=5分钟）
-	timeoutSec := envInt("SYNC_TIMEOUT", 300)
+	// 获取超时配置（默认900秒，多架构镜像体积较大）
+	timeoutSec := envInt("SYNC_TIMEOUT", 900)
 	logger.Debug("Using sync timeout: %ds", timeoutSec)
 
 	// 获取重试次数（默认3次）
@@ -282,8 +282,8 @@ func syncWithRetry(ctx context.Context, p provider.Provider, img string, timeout
 
 		// 检查是否需要重试
 		if lastErr != nil && isRetryableError(lastErr) && attempt < maxRetries {
-			logger.Debug("Attempt %d failed for %s: %v, retrying...", attempt, img, lastErr)
-			time.Sleep(time.Duration(attempt) * time.Second) // 指数退避
+			logger.Debug("Attempt %d failed for %s: %v, retrying in %s", attempt, img, lastErr, backoffDelay(attempt))
+			time.Sleep(backoffDelay(attempt))
 			continue
 		}
 
@@ -302,21 +302,40 @@ func syncWithRetry(ctx context.Context, p provider.Provider, img string, timeout
 	return result
 }
 
-// showProgress 显示进度条（使用 stderr 避免与日志混合）
+// backoffDelay 第 attempt 次尝试失败后的等待时间，指数增长并封顶在 30s
+func backoffDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := time.Duration(1<<uint(attempt-1)) * time.Second
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	return delay
+}
+
+// showProgress 显示进度条。CI 里 stderr 不是 TTY，\r 会被展开成大量乱码行，所以只在终端渲染
 func showProgress(total int, progressChan <-chan struct{}) {
+	tty := isTerminal(os.Stderr)
 	completed := 0
-	lastCompleted := -1
-	
+
 	for range progressChan {
 		completed++
-		// 只在进度变化时更新
-		if completed != lastCompleted {
-			lastCompleted = completed
+		if tty {
 			printProgressBar(completed, total)
 		}
 	}
-	// 完成后换行
-	fmt.Fprintln(os.Stderr, "")
+	if tty {
+		fmt.Fprintln(os.Stderr, "")
+	}
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 // printProgressBar 打印进度条到 stderr
@@ -391,9 +410,10 @@ func printHelp() {
 	fmt.Println("Environment Variables:")
 	fmt.Println("  PROVIDER              Cloud provider (aliyun)")
 	fmt.Println("  LOG_LEVEL             Log level (DEBUG/INFO/WARN/ERROR), default: INFO")
-	fmt.Println("  SYNC_TIMEOUT          Sync timeout in seconds, default: 300 (5 minutes)")
+	fmt.Println("  SYNC_TIMEOUT          Per-image timeout in seconds, default: 900")
 	fmt.Println("  MAX_RETRIES           Max retry attempts, default: 3")
 	fmt.Println("  CONCURRENCY           Parallel sync count, default: 3")
+	fmt.Println("  PREFERRED_ARCH        Only copy this arch (e.g. amd64); empty means --all, default: empty")
 	fmt.Println("  IMAGE_LIST_FILE       Path to image list file, default: images.txt")
 	fmt.Println("")
 	fmt.Println("Provider specific variables:")

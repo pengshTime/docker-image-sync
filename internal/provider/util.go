@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -72,8 +73,7 @@ func ParseImage(sourceImage string) ParsedImage {
 	return result
 }
 
-// sanitizeImageName 清理镜像名，替换特殊字符
-// 华为云/腾讯云对镜像名有严格要求，需要替换 / 和 .
+// sanitizeImageName 清理镜像名，替换仓库侧可能不接受的特殊字符
 func sanitizeImageName(name string) string {
 	// 替换 / 为 _
 	name = strings.ReplaceAll(name, "/", "_")
@@ -85,8 +85,8 @@ func sanitizeImageName(name string) string {
 }
 
 // BuildTargetImage 构建目标镜像地址
-// 华为云/腾讯云格式: registry/namespace/prefix_name:tag
-// 阿里云格式: registry/namespace/name:tag
+// usePrefix=false: registry/namespace/name:tag（源命名空间被丢弃，同名镜像会撞车）
+// usePrefix=true:  registry/namespace/源命名空间_name:tag
 func BuildTargetImage(registry, namespace string, img ParsedImage, usePrefix bool) string {
 	var targetImageName string
 	
@@ -146,15 +146,21 @@ func checkImageExists(ctx context.Context, image string) (bool, error) {
 	return true, nil
 }
 
-// skopeoCopy 复制镜像（--all 保留多架构 manifest list）
+// skopeoCopyArgs 组装 skopeo copy 参数
+// PREFERRED_ARCH 为空时用 --all 保留 manifest list，并把 media type 转成 docker 格式，
+// 避免部分镜像仓库（如 ACR 个人版）拒绝 OCI index；非空时只复制指定单一架构。
+func skopeoCopyArgs(source, target string) []string {
+	args := []string{"copy", "--src-tls-verify=true", "--dest-tls-verify=true"}
+	if arch := os.Getenv("PREFERRED_ARCH"); arch != "" {
+		args = append(args, "--override-arch", arch, "--override-os", "linux")
+	} else {
+		args = append(args, "--all", "--format", "docker")
+	}
+	return append(args, fmt.Sprintf("docker://%s", source), fmt.Sprintf("docker://%s", target))
+}
+
 func skopeoCopy(ctx context.Context, source, target string) error {
-	cmd := exec.CommandContext(ctx, "skopeo", "copy",
-		"--all",
-		"--src-tls-verify=true",
-		"--dest-tls-verify=true",
-		fmt.Sprintf("docker://%s", source),
-		fmt.Sprintf("docker://%s", target))
-	output, err := cmd.CombinedOutput()
+	output, err := exec.CommandContext(ctx, "skopeo", skopeoCopyArgs(source, target)...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, tail(output))
 	}
