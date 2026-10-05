@@ -7,9 +7,9 @@
 ## ✨ 功能特性
 
 - 🚀 **Skopeo 直接复制** - 无需本地存储，流式传输
-- 🎯 **多架构支持** - 支持 AMD64、ARM64 等多种架构
+- 🎯 **多架构支持** - `skopeo copy --all` 保留 manifest list（AMD64/ARM64 等）
 - 🔄 **智能去重** - 跨云自动检测，避免重复拉取
-- 📧 **邮件通知** - 同步完成后自动发送详细报告
+- 🐍 **本地 Python 管理** - 拉取/提交镜像列表、触发同步、查看结果，无需打开网页
 - 💪 **自动重试** - 网络错误自动重试，最多 3 次
 - ⚡ **并发同步** - 支持多个镜像并行处理
 - 🎨 **进度显示** - 实时显示同步进度
@@ -31,16 +31,15 @@
 | `ALIYUN_REGISTRY_PASSWORD` | 阿里云密码 | `mypassword` |
 | `ALIYUN_REGISTRY` | 阿里云仓库地址 | `registry.cn-hangzhou.aliyuncs.com` |
 
-**邮件通知（可选）：**
+### 2. 编辑镜像列表
 
-| 机密名称 | 说明 | 示例 |
-|---------|------|------|
-| `EMAIL_USERNAME` | 163 邮箱账号 | `example@163.com` |
-| `EMAIL_PASSWORD` | 163 邮箱授权码 | `ABC123DEF` |
+用本地 Python 工具把远端列表拉到本地编辑：
 
-### 2. 添加镜像列表
+```bash
+python scripts/images.py pull          # 远端 images.txt -> 本地
+```
 
-编辑 `images.txt` 文件，按以下格式添加镜像：
+按以下格式添加镜像：
 
 ```txt
 # Docker镜像列表
@@ -50,38 +49,34 @@
 [aliyun]
 jgraph/drawio:latest
 corentinth/it-tools:latest
-fnsys/dockhand:latest
 ```
 
-### 3. 触发同步
+每行一个镜像地址，不带 registry 前缀时默认按 DockerHub 处理（`jgraph/drawio` 等价于
+`docker.io/jgraph/drawio`），不带 tag 时默认 `:latest`。注释行以 `#` 开头。
 
-进入 GitHub 仓库的 Actions 页面，手动触发 "Sync Docker Images" 工作流。
+> 推到阿里云时目标仓库名只取镜像名（`.../命名空间/drawio`），会丢掉源命名空间。
+> 所以 `a/nginx` 和 `b/nginx` 会落到同一个仓库名上：先同步的成功，后一个会被判定为
+> “已存在”而跳过。列表里不要放同名镜像。
 
----
+### 3. 提交并同步
 
-## � 邮件通知格式
-
-同步完成后，您将收到包含以下信息的邮件：
-
+```bash
+python scripts/images.py push          # 提交列表 + 触发同步 + 等待结果
+python scripts/images.py push --no-run # 只提交列表，先不同步
+python scripts/images.py status        # 查看最近几次运行
+python scripts/images.py status 1234567890   # 查看指定 run 的明细
+python scripts/images.py watch         # 等待正在运行的任务结束
 ```
-Docker镜像同步任务已完成
 
-提供商: 阿里云 (aliyun)
-时间: 2026-04-09 08:30:00
+`push` 走 GitHub Contents API 提交，不需要本地 git push；凭据直接复用 git 已登录的
+GitHub 账号（也可用 `--token` 或环境变量 `GITHUB_TOKEN` 覆盖）。注意凭据需要 `workflow`
+权限才能触发 Actions。
 
-总计: 3 个镜像
-- 已同步: 0
-- 已跳过: 3
-- 失败: 0
+同步结果会同时写到 Actions 的 Job summary 页面，`push`/`watch` 会在终端打印每个镜像的
+`[SUCCESS] / [SKIP] / [FAIL]` 明细。
 
-[已跳过]
-  ⏭ docker.io/jgraph/drawio:latest
-    registry.cn-hangzhou.aliyuncs.com/my-namespace/drawio
-  ⏭ docker.io/corentinth/it-tools:latest
-    registry.cn-hangzhou.aliyuncs.com/my-namespace/it_tools
-  ⏭ docker.io/fnsys/dockhand:latest
-    registry.cn-hangzhou.aliyuncs.com/my-namespace/dockhand
-```
+> 编辑 `images.txt` 不再自动触发同步（原来的 `push` 触发已移除），统一由
+> `python scripts/images.py push` 显式触发，避免保存列表时误跑一次同步。
 
 ---
 
@@ -89,14 +84,14 @@ Docker镜像同步任务已完成
 
 ### 环境变量
 
+在 Settings → Secrets and variables → Actions 的 **Variables** 里配置，workflow 会透传给程序：
+
 | 变量名 | 默认值 | 说明 |
 |-------|--------|------|
 | `LOG_LEVEL` | `INFO` | 日志级别 (DEBUG/INFO/WARN/ERROR) |
-| `TIMEOUT` | `300` | 同步超时时间（秒） |
+| `SYNC_TIMEOUT` | `300` | 单个镜像同步超时时间（秒） |
 | `MAX_RETRIES` | `3` | 失败重试次数 |
 | `CONCURRENCY` | `3` | 并发同步数量 |
-
----
 
 ## 📄 开源协议
 
