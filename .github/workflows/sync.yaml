@@ -14,11 +14,18 @@ env:
   SYNC_TIMEOUT: ${{ vars.SYNC_TIMEOUT }}
   MAX_RETRIES: ${{ vars.MAX_RETRIES }}
   CONCURRENCY: ${{ vars.CONCURRENCY }}
+  PREFERRED_ARCH: ${{ vars.PREFERRED_ARCH }}
+
+# 同一时间只跑一个同步，避免两次触发互抢
+concurrency:
+  group: sync
+  cancel-in-progress: false
 
 jobs:
   sync-aliyun:
     name: Sync to Aliyun
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -33,6 +40,9 @@ jobs:
           curl -sL https://github.com/lework/skopeo-binary/releases/download/v1.14.2/skopeo-linux-amd64 -o /usr/local/bin/skopeo
           chmod +x /usr/local/bin/skopeo
           skopeo --version
+
+      - name: Test
+        run: go test ./...
 
       - name: Build
         run: |
@@ -54,13 +64,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Fetching workflow runs..."
-          # 获取所有运行记录（排除当前这次）
+          # 保留最近 5 次历史（不含当前这次），更早的清掉
           current_run_id=${{ github.run_id }}
           runs=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=100" | \
-            jq -r ".workflow_runs[] | select(.id != $current_run_id) | .id")
+            jq -r ".workflow_runs | map(select(.id != $current_run_id)) | .[5:][] | .id")
 
-          # 删除所有旧记录，只保留当前这次
+          # 删除超出保留数量的旧记录
           count=0
           for run_id in $runs; do
             echo "Deleting run $run_id..."
@@ -69,4 +79,4 @@ jobs:
             count=$((count + 1))
           done
 
-          echo "Deleted $count old workflow runs, keeping only current run ($current_run_id)"
+          echo "Deleted $count old workflow runs, keeping the 5 most recent plus current run ($current_run_id)"
