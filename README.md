@@ -64,6 +64,7 @@ corentinth/it-tools:latest
 ```bash
 python scripts/images.py push          # 提交列表 + 触发同步 + 等待结果
 python scripts/images.py push --no-run # 只提交列表，先不同步
+python scripts/images.py run           # 列表不变，只重跑一次同步
 python scripts/images.py status        # 查看最近几次运行
 python scripts/images.py status 1234567890   # 查看指定 run 的明细
 python scripts/images.py watch         # 等待正在运行的任务结束

@@ -2,11 +2,13 @@
 """本地管理 images.txt 并触发/查看 GitHub Actions 同步。
 
 用法:
-    python scripts/images.py pull              # 远端列表 -> 本地
+    python scripts/images.py pull              # 远端列表 -> 本地（本地有改动会拒绝覆盖，加 --force）
     python scripts/images.py push              # 本地 -> 远端并触发同步，等待结果
     python scripts/images.py push --no-run     # 只提交列表，不触发同步
-    python scripts/images.py status            # 最近一次运行的结果
-    python scripts/images.py watch [run_id]    # 等待某次运行结束并打印摘要
+    python scripts/images.py run               # 列表不变，只重跑一次同步
+    python scripts/images.py status            # 最近几次运行的状态
+    python scripts/images.py status 1234567890 # 指定 run 的结果明细
+    python scripts/images.py watch [run_id]    # 等待运行结束并打印摘要
 
 凭据复用 git 已登录的 GitHub 账号（git credential），也可用 --token 或环境变量
 GITHUB_TOKEN / GH_TOKEN 覆盖。只依赖标准库。
@@ -186,23 +188,28 @@ def latest_runs(owner, repo, token, limit=10):
     return response.get("workflow_runs", []) if response else []
 
 
-def find_run(owner, repo, token, sha) -> dict | None:
-    """找到由指定 commit 触发的运行；找不到则退回最近一次运行。"""
-    deadline = time.time() + 60
-    newest = None
+def wait_for_new_run(owner, repo, token, known: set[int], timeout=120) -> dict | None:
+    """等 dispatch 之后新出现的 run；workflow_dispatch 不绑定 commit，只能这么认。"""
+    deadline = time.time() + timeout
     while time.time() < deadline:
-        runs = latest_runs(owner, repo, token)
-        if runs:
-            newest = runs[0]
-            for run in runs:
-                if run["head_sha"] == sha:
-                    return run
-            if newest.get("event") == "workflow_dispatch" and newest.get("status") != "completed":
-                return newest
-        if not sha:
-            return newest
-        time.sleep(2)
-    return newest
+        time.sleep(3)
+        for run in latest_runs(owner, repo, token):
+            if run["id"] not in known:
+                return run
+    return None
+
+
+def trigger_and_wait(owner, repo, branch, path, token):
+    """触发一次同步并把结果打出来，任何情况下都以 run 结论作为退出码。"""
+    known = {run["id"] for run in latest_runs(owner, repo, token)}
+    dispatch(owner, repo, branch, path, token)
+    run = wait_for_new_run(owner, repo, token, known)
+    if not run:
+        die("触发后 120s 内没出现新的运行：确认凭据有 workflow 权限，且 "
+            f"{WORKFLOW} 已存在于 {branch} 分支。")
+    finished = wait_for_run(owner, repo, run, token)
+    print_run(owner, repo, finished, token, show_log=True)
+    raise SystemExit(0 if finished["conclusion"] == "success" else 1)
 
 
 def results_from_log(text: str) -> list[str]:
@@ -326,23 +333,17 @@ def cmd_push(args, owner, repo, branch, token):
     content = read_local(args.local_list)
     sha = commit_list(owner, repo, branch, args.list, content, token, args.message or f"Update {args.list}")
     if sha is None:
-        if not args.no_run:
-            run = latest_runs(owner, repo, token)[:1]
-            if run:
-                print_run(owner, repo, run[0], token, show_log=False)
-                out("  （内容与远端相同，未产生新提交，上面是最近一次运行）")
+        out(f"列表内容与远端一致，没有提交。要重跑同步用: python scripts/images.py run")
         return
     out(f"已提交 {owner}/{repo}:{args.list} @ {sha[:8]}")
     if args.no_run:
         out("按 --no-run 跳过触发同步。")
         return
-    dispatch(owner, repo, branch, args.list, token)
-    run = find_run(owner, repo, token, sha)
-    if not run:
-        die("未能定位触发的运行，请到 Actions 页面查看。")
-    finished = wait_for_run(owner, repo, run, token)
-    print_run(owner, repo, finished, token, show_log=True)
-    raise SystemExit(0 if finished["conclusion"] == "success" else 1)
+    trigger_and_wait(owner, repo, branch, args.list, token)
+
+
+def cmd_run(args, owner, repo, branch, token):
+    trigger_and_wait(owner, repo, branch, args.list, token)
 
 
 def cmd_status(args, owner, repo, branch, token):
@@ -360,10 +361,13 @@ def cmd_status(args, owner, repo, branch, token):
 
 
 def cmd_watch(args, owner, repo, branch, token):
-    run = {"id": int(args.run_id)} if args.run_id else find_run(owner, repo, token, None)
-    if not run:
-        die("没有可等待的运行。")
-    run = request("GET", f"/repos/{owner}/{repo}/actions/runs/{run['id']}", token)
+    run_id = args.run_id
+    if not run_id:
+        runs = latest_runs(owner, repo, token, limit=1)
+        if not runs:
+            die("没有可等待的运行。")
+        run_id = runs[0]["id"]
+    run = request("GET", f"/repos/{owner}/{repo}/actions/runs/{run_id}", token)
     if run["status"] != "completed":
         run = wait_for_run(owner, repo, run, token)
     print_run(owner, repo, run, token, show_log=True)
@@ -375,7 +379,7 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding="utf-8")
 
     parser = argparse.ArgumentParser(description="管理 docker-image-sync 的镜像列表并触发同步")
-    parser.add_argument("command", nargs="?", choices=["pull", "push", "status", "watch"], default="pull")
+    parser.add_argument("command", nargs="?", choices=["pull", "push", "run", "status", "watch"], default="pull")
     parser.add_argument("--list", default=DEFAULT_LIST, help=f"列表文件名，默认 {DEFAULT_LIST}")
     parser.add_argument("--repo", help="owner/name，默认从 git origin 解析")
     parser.add_argument("--ref", help="分支，默认仓库默认分支")
@@ -392,7 +396,7 @@ def main(argv=None):
     token = get_token(args.token)
     branch = resolve_branch(owner, repo, token, args.ref)
 
-    handlers = {"pull": cmd_pull, "push": cmd_push, "status": cmd_status, "watch": cmd_watch}
+    handlers = {"pull": cmd_pull, "push": cmd_push, "run": cmd_run, "status": cmd_status, "watch": cmd_watch}
     handlers[args.command](args, owner, repo, branch, token)
 
 
