@@ -108,7 +108,29 @@ def get_token(explicit: str | None) -> str:
 
 # ---------------------------------------------------------------- API
 
-def request(method: str, path: str, token: str, body=None, accept="application/vnd.github+json"):
+RETRY_HTTP = (429, 500, 502, 503, 504)
+
+
+def _urlopen(req, timeout, retry):
+    """带退避重试地发请求。长时间轮询里 TLS 抖动和 5xx 很常见，不该让整个 watch 挂掉。"""
+    attempts = 4 if retry else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code in RETRY_HTTP and attempt < attempts:
+                time.sleep(2 * attempt)
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if attempt < attempts:
+                time.sleep(2 * attempt)
+                continue
+            raise
+
+
+def request(method, path, token, body=None, accept="application/vnd.github+json"):
     url = path if path.startswith("http") else f"{API}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -117,9 +139,10 @@ def request(method: str, path: str, token: str, body=None, accept="application/v
     req.add_header("User-Agent", "docker-image-sync-local")
     if data:
         req.add_header("Content-Type", "application/json")
+    # 只重试幂等的 GET，POST/PUT 重试会重复触发运行或重复提交
+    retry = method == "GET"
     try:
-        with urllib.request.urlopen(req, timeout=60) as response:
-            payload = response.read()
+        payload = _urlopen(req, 60, retry)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")
         try:
@@ -131,8 +154,8 @@ def request(method: str, path: str, token: str, body=None, accept="application/v
         if exc.code == 404 and "/actions/workflows/" in url:
             detail += f"（{WORKFLOW} 可能还没推送到目标分支）"
         die(f"{method} {url} -> HTTP {exc.code}: {detail}")
-    except urllib.error.URLError as exc:
-        die(f"{method} {url} 请求失败: {exc.reason}")
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        die(f"{method} {url} 请求失败: {exc}")
     if not payload:
         return None
     return json.loads(payload)
@@ -245,12 +268,13 @@ def fetch_job_log(owner, repo, run_id, token) -> str:
     req.add_header("Authorization", f"Bearer {token}")
     req.add_header("User-Agent", "docker-image-sync-local")
     try:
-        with urllib.request.urlopen(req, timeout=120) as response:
-            blob = response.read()
+        blob = _urlopen(req, 120, True)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            return ""  # 日志被旧的 run 清理步骤删掉了
+            return ""  # 日志还没生成，或 run 已被清理步骤删掉
         die(f"下载日志失败: HTTP {exc.code}")
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        die(f"下载日志失败: {exc}")
     with zipfile.ZipFile(io.BytesIO(blob)) as archive:
         for name in sorted(archive.namelist()):
             if name.endswith(".txt"):
