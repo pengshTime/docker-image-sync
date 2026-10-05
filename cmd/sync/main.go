@@ -292,11 +292,16 @@ func syncWithRetry(ctx context.Context, p provider.Provider, img string, timeout
 	}
 
 	if lastErr != nil {
-		return &provider.SyncResult{
-			SourceImage:  img,
-			Success:      false,
-			ErrorMessage: lastErr.Error(),
+		// provider 已经在 result 里填好 TargetImage 和带上下文的错误信息，复用它们，
+		// 否则失败日志只有源地址，看不出要往哪个仓库推
+		if result == nil {
+			result = &provider.SyncResult{SourceImage: img}
 		}
+		if result.ErrorMessage == "" {
+			result.ErrorMessage = lastErr.Error()
+		}
+		result.Success = false
+		return result
 	}
 
 	return result

@@ -94,7 +94,7 @@ GitHub 账号（也可用 `--token` 或环境变量 `GITHUB_TOKEN` 覆盖）。�
 | `SYNC_TIMEOUT` | `900` | 单个镜像同步超时时间（秒），失败重试的等待按 1s/2s/4s… 递增并封顶 30s |
 | `MAX_RETRIES` | `3` | 失败重试次数 |
 | `CONCURRENCY` | `3` | 并发同步数量 |
-| `PREFERRED_ARCH` | 空 | 留空用 `skopeo copy --all --format docker` 保留多架构；设为 `amd64` 等值则只同步该单一架构。**如果 ACR 拒绝多架构镜像（OCI/docker index），把它设为 `amd64` 即可回退老行为，不用改代码** |
+| `PREFERRED_ARCH` | 空 | 留空用 `skopeo copy --all --format v2s2` 保留多架构并输出 docker schema2 media type；设为 `amd64` 等值则只同步该单一架构。**如果 ACR 拒绝多架构镜像，把它设为 `amd64` 即可回退老行为，不用改代码** |
 
 其他说明：
 

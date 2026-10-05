@@ -55,8 +55,8 @@ func TestBuildTargetImage(t *testing.T) {
 func TestSkopeoCopyArgs(t *testing.T) {
 	t.Setenv("PREFERRED_ARCH", "")
 	args := strings.Join(skopeoCopyArgs("docker.io/library/nginx:latest", "reg/ns/nginx:latest"), " ")
-	if !strings.Contains(args, "--all --format docker") {
-		t.Errorf("default args = %q, want multi-arch docker media type", args)
+	if !strings.Contains(args, "--all --format v2s2") {
+		t.Errorf("default args = %q, want multi-arch docker schema2 media type", args)
 	}
 	if strings.Contains(args, "--override-arch") {
 		t.Errorf("default args must not pin an arch: %q", args)

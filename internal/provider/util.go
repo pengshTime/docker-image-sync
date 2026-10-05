@@ -147,14 +147,15 @@ func checkImageExists(ctx context.Context, image string) (bool, error) {
 }
 
 // skopeoCopyArgs 组装 skopeo copy 参数
-// PREFERRED_ARCH 为空时用 --all 保留 manifest list，并把 media type 转成 docker 格式，
+// PREFERRED_ARCH 为空时用 --all 保留 manifest list，并把 media type 转成 docker schema2，
 // 避免部分镜像仓库（如 ACR 个人版）拒绝 OCI index；非空时只复制指定单一架构。
+// 注意 --format 只接受 oci/v2s1/v2s2，写 docker 会被 skopeo 1.14 直接拒掉。
 func skopeoCopyArgs(source, target string) []string {
 	args := []string{"copy", "--src-tls-verify=true", "--dest-tls-verify=true"}
 	if arch := os.Getenv("PREFERRED_ARCH"); arch != "" {
 		args = append(args, "--override-arch", arch, "--override-os", "linux")
 	} else {
-		args = append(args, "--all", "--format", "docker")
+		args = append(args, "--all", "--format", "v2s2")
 	}
 	return append(args, fmt.Sprintf("docker://%s", source), fmt.Sprintf("docker://%s", target))
 }
